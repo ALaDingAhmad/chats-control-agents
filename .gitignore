@@ -1,0 +1,32 @@
+# Runtime state & user data (never commit)
+chat_sessions/
+weixin_state/
+config.json
+
+# Logs
+*.log
+*_stdout.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# Backups & temp
+*.bak
+*.tmp
+*.json.tmp
+
+# Sibling tool metadata (not part of this codebase)
+entities.json
+mempalace.yaml

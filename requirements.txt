@@ -1,0 +1,21 @@
+# Runtime dependencies for claude-mcp-bridge
+# Install: pip install -r requirements.txt
+
+# Web server (browser bridge)
+starlette>=0.38
+uvicorn>=0.32
+
+# WeChat iLink Bot longpoll / HTTP
+aiohttp>=3.13
+
+# MCP server inside mcp_bridge.py (web-chat tools for child claude)
+mcp>=1.27
+
+# Process introspection (cross-platform): identify daemon-spawned child claude
+# PIDs vs. user-launched claude.exe so we can clean up orphans safely.
+psutil>=7.0
+
+# Windows-only: needed by claude_daemon.py to spawn claude.exe in a PTY.
+# Harmless to skip on Linux/macOS (daemon will not import it there if we
+# port the spawn layer to ptyprocess later).
+pywinpty>=3.0; sys_platform == "win32"
