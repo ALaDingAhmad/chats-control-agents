@@ -38,7 +38,8 @@ except ImportError:
     print("ERROR: pywinpty not installed. Run: pip install pywinpty", file=sys.stderr)
     sys.exit(2)
 
-ROOT = Path(__file__).parent
+# Project root: agent_bridge/backends/claude_code/daemon.py → parents[3]
+ROOT = Path(__file__).resolve().parents[3]
 # Per-alias log files so multiple daemons don't trample each other
 ALIAS_RE = re.compile(r"^[a-zA-Z0-9_\-一-鿿]{1,32}$")
 CLAUDE_BIN = (

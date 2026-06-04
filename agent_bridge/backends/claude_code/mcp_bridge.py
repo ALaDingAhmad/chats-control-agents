@@ -25,7 +25,9 @@ from datetime import datetime
 
 from mcp.server.fastmcp import FastMCP
 
-ROOT = Path(__file__).parent
+# Project root = grandparent of agent_bridge package = 3 parents up from this file
+# (agent_bridge/backends/claude_code/mcp_bridge.py → parents[3])
+ROOT = Path(__file__).resolve().parents[3]
 LOG_PATH = ROOT / "mcp_bridge.log"
 
 # Alias is set by the daemon via env. Default keeps single-session legacy use working.
