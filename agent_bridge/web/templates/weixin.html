@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>微信桥接</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; background: #f5f5f5; margin: 0; }
+  #app { max-width: 480px; margin: 24px auto; background: #fff; padding: 24px;
+         border-radius: 8px; border: 1px solid #ddd; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  .status { padding: 12px; background: #efefef; border-radius: 6px;
+            font-size: 14px; margin-bottom: 16px; }
+  .status.connected { background: #d4edda; color: #155724; }
+  .status.error { background: #f8d7da; color: #721c24; }
+  button { padding: 10px 18px; background: #07c160; color: #fff; border: 0;
+           border-radius: 6px; cursor: pointer; font-size: 14px; }
+  button:disabled { background: #999; }
+  button.secondary { background: #6c757d; }
+  #qr-container { text-align: center; margin: 20px 0; min-height: 240px; }
+  #qr-container canvas, #qr-container img { display: inline-block; }
+  .hint { color: #666; font-size: 12px; margin-top: 6px; }
+  .meta { font-size: 12px; color: #888; word-break: break-all; }
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>微信桥接</h1>
+  <div id="status" class="status">检查状态中...</div>
+  <div>
+    <button id="btn-start">开始扫码登录</button>
+    <button id="btn-stop" class="secondary" style="display:none">断开账号</button>
+  </div>
+  <div id="qr-container"></div>
+  <div class="hint" id="hint"></div>
+  <div class="meta" id="meta"></div>
+  <p style="margin-top:24px; font-size:12px; color:#666;">
+    扫码登录后，对绑定的微信账号说话，消息会被转发到 Claude；Claude 的回复也会发回微信。
+    <br>聊天页面：<a href="/">/</a>
+  </p>
+</div>
+<!-- qrcode.js — encodes a URL string into a scannable QR canvas/img client-side -->
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script>
+const statusEl = document.getElementById('status');
+const btnStart = document.getElementById('btn-start');
+const btnStop  = document.getElementById('btn-stop');
+const qrEl     = document.getElementById('qr-container');
+const hintEl   = document.getElementById('hint');
+const metaEl   = document.getElementById('meta');
+let qrObj = null;
+let pollTimer = null;
+
+function setStatus(text, cls) {
+  statusEl.textContent = text;
+  statusEl.className = 'status' + (cls ? ' ' + cls : '');
+}
+
+function renderQR(url) {
+  qrEl.innerHTML = '';
+  qrObj = new QRCode(qrEl, { text: url, width: 240, height: 240,
+                              correctLevel: QRCode.CorrectLevel.M });
+}
+
+async function refresh() {
+  const r = await fetch('/weixin/status');
+  const d = await r.json();
+  if (d.connected) {
+    setStatus(`已连接（${d.account_id || '未知账号'}）`, 'connected');
+    btnStart.style.display = 'none';
+    btnStop.style.display = 'inline-block';
+    qrEl.innerHTML = '';
+    hintEl.textContent = `长轮询: ${d.running ? '运行中' : '未运行'}`;
+    metaEl.textContent = '';
+  } else {
+    setStatus('未连接');
+    btnStart.style.display = 'inline-block';
+    btnStop.style.display = 'none';
+    if (d.qr_status === 'waiting' && d.qrcode_img_content) {
+      renderQR(d.qrcode_img_content);
+      hintEl.textContent = '请用要绑定的微信扫描以上二维码并同意授权';
+      metaEl.textContent = '原始链接：' + d.qrcode_img_content;
+    } else if (d.qr_status === 'scaned') {
+      hintEl.textContent = '已扫码，请在微信里确认...';
+    } else if (d.qr_status === 'expired') {
+      hintEl.textContent = '二维码已过期，请重新点击"开始扫码"';
+      qrEl.innerHTML = '';
+    } else if (d.qr_status === 'error') {
+      setStatus('登录错误：' + (d.qr_error || '未知'), 'error');
+    } else {
+      qrEl.innerHTML = '';
+      hintEl.textContent = '';
+      metaEl.textContent = '';
+    }
+  }
+}
+
+async function start() {
+  btnStart.disabled = true;
+  setStatus('请求二维码...');
+  try {
+    const r = await fetch('/weixin/qr/start', {method: 'POST'});
+    const d = await r.json();
+    if (!d.ok) {
+      setStatus('请求失败：' + (d.error || '未知'), 'error');
+      btnStart.disabled = false;
+      return;
+    }
+  } catch (e) {
+    setStatus('网络错误：' + e.message, 'error');
+    btnStart.disabled = false;
+    return;
+  }
+  btnStart.disabled = false;
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(refresh, 1500);
+  await refresh();
+}
+
+async function stop() {
+  if (!confirm('确定断开微信？')) return;
+  await fetch('/weixin/disconnect', {method: 'POST'});
+  await refresh();
+}
+
+btnStart.addEventListener('click', start);
+btnStop.addEventListener('click', stop);
+refresh();
+// Keep refreshing slowly so a connected session reflects long-poll status
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
