@@ -6,7 +6,7 @@ Stores:
   - Per-peer context_token (iLink requires echoing the most recent token
     for each conversation; without it replies vanish).
 
-State directory: D:/aiproject/claude-mcp-bridge/weixin_state/
+State directory: <project_root>/weixin_state/
 """
 from __future__ import annotations
 
@@ -15,11 +15,13 @@ import threading
 from pathlib import Path
 from typing import Dict, Optional
 
-ROOT = Path(__file__).parent / "weixin_state"
-ROOT.mkdir(parents=True, exist_ok=True)
+from ...core.paths import ROOT as PROJECT_ROOT
 
-ACCOUNT_FILE = ROOT / "account.json"
-CONTEXT_TOKEN_FILE = ROOT / "context_tokens.json"
+STATE_DIR = PROJECT_ROOT / "weixin_state"
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+ACCOUNT_FILE = STATE_DIR / "account.json"
+CONTEXT_TOKEN_FILE = STATE_DIR / "context_tokens.json"
 
 _lock = threading.Lock()
 
