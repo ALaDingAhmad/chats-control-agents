@@ -407,6 +407,10 @@ def main() -> int:
                         _press_3()
                         if not rate_limited:
                             rate_limited = True
+                            # Anchor retry cooldown to now — otherwise the
+                            # 0.0 initial value triggers an immediate retry
+                            # that will be rejected for sure.
+                            last_trigger_retry_at = now
                             _write_outbox_notice(
                                 "Claude 账号已撞用量上限。Bridge 会每 5 分钟重试，"
                                 "限额重置后自动恢复。如急用请到电脑切账号："
