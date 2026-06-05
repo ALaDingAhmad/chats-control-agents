@@ -38,10 +38,13 @@
 
   .section-title { font-size: 12px; font-weight: 600; color: var(--muted);
                    text-transform: uppercase; letter-spacing: 0.06em;
-                   margin: 28px 0 12px; padding-bottom: 6px;
+                   margin: 0 0 12px; padding-bottom: 6px;
                    border-bottom: 1px solid var(--border); }
-  .section-title:first-of-type { margin-top: 0; }
-  .grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
+  /* Two side-by-side sections: Backends (left) + Channels (right). */
+  .columns { display: grid; gap: 28px; grid-template-columns: 1fr 1fr; }
+  @media (max-width: 760px) { .columns { grid-template-columns: 1fr; } }
+  .column .grid { grid-template-columns: 1fr; }
+  .grid { display: grid; gap: 16px; grid-template-columns: 1fr; }
   .card.disabled { opacity: 0.55; }
   .card.disabled::before { background: #cbd5e1; }
   .card .soon { font-size: 11px; color: var(--muted); background: #eef2f7;
@@ -123,8 +126,10 @@
     <p>把 Claude Code 作为后端，桥接到浏览器聊天 / 微信等渠道。</p>
   </header>
 
-  <div class="section-title">Backends · AI 后端</div>
-  <div class="grid">
+  <div class="columns">
+   <div class="column">
+    <div class="section-title">Backends · AI 后端</div>
+    <div class="grid">
     <!-- Claude Code -->
     <div class="card" id="card-claude">
       <h2><span class="icon">🤖</span>Claude Code <span class="badge dim" id="claude-mcp">--</span></h2>
@@ -142,10 +147,12 @@
       <div class="body">基于 API 的轻量后端，用于无需本地 TUI 的场景。</div>
       <div class="kv"><span>状态</span><b>未启用</b></div>
     </div>
-  </div>
+    </div>
+   </div>
 
-  <div class="section-title">Channels · 入口渠道</div>
-  <div class="grid">
+   <div class="column">
+    <div class="section-title">Channels · 入口渠道</div>
+    <div class="grid">
     <!-- 微信 -->
     <div class="card" id="card-weixin">
       <h2><span class="icon">📱</span>微信 <span class="badge dim" id="wx-state">--</span></h2>
@@ -163,6 +170,8 @@
       <div class="body">飞书 Bot 接入，团队场景使用。</div>
       <div class="kv"><span>状态</span><b>未启用</b></div>
     </div>
+    </div>
+   </div>
   </div>
 
   <footer>
