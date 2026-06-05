@@ -97,6 +97,19 @@ async def send_message(request):
     text = cmd.strip_passthrough_prefix(text)
     alias = sx.get_current()
     log.info("send to %s: %d chars", alias, len(text))
+    # Revive daemon on demand if it died while idle.
+    from ..spawn_helpers import ensure_daemon_alive
+    alive = await ensure_daemon_alive(alias)
+    if not alive:
+        history = load_history(alias)
+        history.append({"role": "user", "text": text, "ts": now_iso()})
+        history.append({
+            "role": "assistant",
+            "text": "⚠️ agent 拉起失败，请稍后再试或检查 daemon.log。",
+            "ts": now_iso(), "source": "system",
+        })
+        save_history(history, alias)
+        return JSONResponse({"ok": False, "reason": "daemon_unavailable", "alias": alias})
     # Clear stale outbox FIRST so /poll won't return last turn's reply as
     # if it were the answer to this new message.
     try:

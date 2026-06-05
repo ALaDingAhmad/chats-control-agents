@@ -212,6 +212,20 @@ async def _inbound_longpoll(account: dict):
                     text = cmd.strip_passthrough_prefix(text)
                     alias = sx.get_current()
                     _wx.setdefault("alias_peer", {})[alias] = sender
+                    # Revive daemon on demand if it died while idle.
+                    from .spawn_helpers import ensure_daemon_alive
+                    alive = await ensure_daemon_alive(alias)
+                    if not alive:
+                        try:
+                            await wx.send_text(
+                                session, base_url=base_url, token=token,
+                                to_user_id=sender,
+                                text="⚠️ agent 拉起失败，请稍后再试。",
+                                context_token=ctx_tok,
+                            )
+                        except Exception as e:
+                            log.warning("weixin notify spawn-fail failed: %s", e)
+                        continue
                     inbox_path(alias).parent.mkdir(parents=True, exist_ok=True)
                     try:
                         inbox_path(alias).write_text(text, encoding="utf-8")
