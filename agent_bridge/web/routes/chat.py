@@ -74,17 +74,42 @@ async def new_session(request):
 async def dashboard_status(request):
     """Aggregated state for the dashboard cards. Keeps the page to one
     request instead of fanning out to /sessions + /weixin/status + /config."""
+    import json as _json
+    from pathlib import Path as _Path
+
     from ...channels.weixin import state as wxs
     from ...core import config as cfg
+    from ...core.paths import ROOT
     from ..weixin_runtime import get_wx_state
     sessions = sx.list_sessions()
     online = sum(1 for s in sessions if s.get("online"))
     acct = wxs.load_account()
     wx_state = get_wx_state()
+
+    # MCP registration check: does ~/.claude.json have a web-chat entry
+    # pointing at OUR mcp_bridge.py?
+    mcp_registered = False
+    try:
+        claude_json = _Path.home() / ".claude.json"
+        if claude_json.exists():
+            d = _json.loads(claude_json.read_text(encoding="utf-8"))
+            wc = (d.get("mcpServers") or {}).get("web-chat") or {}
+            args = wc.get("args") or []
+            expected = str(ROOT / "agent_bridge" / "backends" / "claude_code" / "mcp_bridge.py")
+            expected_norm = expected.replace("\\", "/")
+            mcp_registered = any(
+                str(a).replace("\\", "/") == expected_norm for a in args
+            )
+    except Exception:
+        pass
+
     return JSONResponse({
         "current": sx.get_current(),
         "sessions_total": len(sessions),
         "sessions_online": online,
+        "claude": {
+            "mcp_registered": mcp_registered,
+        },
         "weixin": {
             "connected": bool(acct and acct.get("bot_token")),
             "running": wx_state.get("running", False),

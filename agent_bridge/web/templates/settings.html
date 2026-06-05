@@ -122,6 +122,7 @@
 
   <div class="tabs">
     <a href="#workspace"   data-tab="workspace" class="active">工作空间</a>
+    <a href="#sessions"    data-tab="sessions">会话</a>
     <a href="#weixin"      data-tab="weixin">微信</a>
     <a href="#claude-code" data-tab="claude-code">Claude Code</a>
     <a href="#system"      data-tab="system">系统</a>
@@ -138,6 +139,16 @@
         <button type="button" class="primary" id="ws-save">保存</button>
       </div>
       <div class="msg" id="ws-msg"></div>
+    </div>
+  </section>
+
+  <!-- ─── 会话 ────────────────────────────────────────────── -->
+  <section class="tab" id="tab-sessions">
+    <div class="card">
+      <h2>已注册会话</h2>
+      <div class="hint">每个 alias 对应 <code>chat_sessions/&lt;alias&gt;/</code>。在线 = daemon 进程活着。点行可设为当前；动作按钮在右侧。</div>
+      <div id="sess-table" style="margin-top: 8px;"></div>
+      <div class="msg" id="sess-msg"></div>
     </div>
   </section>
 
@@ -202,6 +213,7 @@ function setActiveTab(name) {
   });
   // Load on demand
   if (name === 'workspace')   refreshWorkspace();
+  if (name === 'sessions')    refreshSessions();
   if (name === 'weixin')      refreshWeixin();
   if (name === 'claude-code') refreshClaudeCode();
   if (name === 'system')      refreshSystem();
@@ -214,7 +226,7 @@ document.querySelectorAll('.tabs a').forEach(a => {
   });
 });
 const initial = (location.hash || '#workspace').slice(1);
-setActiveTab(['workspace','weixin','claude-code','system'].includes(initial) ? initial : 'workspace');
+setActiveTab(['workspace','sessions','weixin','claude-code','system'].includes(initial) ? initial : 'workspace');
 
 // ── Workspace ────────────────────────────────────────────────
 const wsList = document.getElementById('ws-list');
@@ -377,6 +389,117 @@ wxStop.addEventListener('click', async () => {
 setInterval(() => {
   if (document.getElementById('tab-weixin').classList.contains('active')) refreshWeixin();
 }, 5000);
+
+// ── Sessions ───────────────────────────────────────────────
+const sessTable = document.getElementById('sess-table');
+const sessMsg   = document.getElementById('sess-msg');
+
+function fmtTs(ts) {
+  if (!ts) return '--';
+  // unix epoch float or iso string
+  const d = (typeof ts === 'number') ? new Date(ts * 1000) : new Date(ts);
+  if (isNaN(d)) return String(ts);
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+async function refreshSessions() {
+  sessMsg.textContent = '';
+  try {
+    const r = await fetch('/sessions');
+    const d = await r.json();
+    if (!d.sessions.length) {
+      sessTable.innerHTML = '<div style="color:#64748b; padding:16px; text-align:center;">没有已注册的会话。到聊天页点"开始新会话"。</div>';
+      return;
+    }
+    sessTable.innerHTML = '';
+    const table = document.createElement('table');
+    table.style.width = '100%';
+    table.style.borderCollapse = 'collapse';
+    table.innerHTML = `
+      <thead>
+        <tr style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.05em;">
+          <th style="text-align:left; padding:8px 6px; border-bottom:1px solid #e2e8f0;">alias</th>
+          <th style="text-align:left; padding:8px 6px; border-bottom:1px solid #e2e8f0;">状态</th>
+          <th style="text-align:left; padding:8px 6px; border-bottom:1px solid #e2e8f0;">cwd</th>
+          <th style="text-align:left; padding:8px 6px; border-bottom:1px solid #e2e8f0;">最后活动</th>
+          <th style="text-align:right; padding:8px 6px; border-bottom:1px solid #e2e8f0;">操作</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    `;
+    const tbody = table.querySelector('tbody');
+    d.sessions.forEach(s => {
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid #f1f5f9';
+      const stateBadge = s.online ? '<span class="badge on">在线</span>'
+                                  : '<span class="badge off">离线</span>';
+      const curMark = s.current ? ' <span class="badge dim" style="margin-left:4px;">当前</span>' : '';
+      tr.innerHTML = `
+        <td style="padding:8px 6px; font-family:monospace; font-size:12px;"><b>${s.alias}</b>${curMark}</td>
+        <td style="padding:8px 6px;">${stateBadge}</td>
+        <td style="padding:8px 6px; color:#64748b; font-family:monospace; font-size:11px;">${s.cwd || '--'}</td>
+        <td style="padding:8px 6px; color:#64748b; font-size:12px;">${fmtTs(s.last_active)}</td>
+        <td style="padding:8px 6px; text-align:right; white-space:nowrap;"></td>
+      `;
+      const actions = tr.querySelector('td:last-child');
+      if (!s.current) {
+        const useBtn = document.createElement('button');
+        useBtn.className = 'btn secondary';
+        useBtn.style.padding = '4px 10px'; useBtn.style.fontSize = '12px';
+        useBtn.textContent = '设为当前';
+        useBtn.addEventListener('click', () => sessAction('/session/use', s.alias));
+        actions.appendChild(useBtn);
+      }
+      const chatBtn = document.createElement('a');
+      chatBtn.className = 'btn secondary';
+      chatBtn.style.padding = '4px 10px'; chatBtn.style.fontSize = '12px';
+      chatBtn.style.marginLeft = '4px'; chatBtn.style.textDecoration = 'none';
+      chatBtn.href = '/chat'; chatBtn.textContent = '聊天';
+      actions.appendChild(chatBtn);
+      if (s.online) {
+        const endBtn = document.createElement('button');
+        endBtn.className = 'btn secondary';
+        endBtn.style.padding = '4px 10px'; endBtn.style.fontSize = '12px';
+        endBtn.style.marginLeft = '4px'; endBtn.style.color = '#dc2626';
+        endBtn.textContent = '结束 daemon';
+        endBtn.addEventListener('click', () => {
+          if (!confirm(`确定结束 ${s.alias} 的 daemon (pid=${s.daemon_pid})？\n会话目录和历史会保留。`)) return;
+          sessAction('/session/end', s.alias);
+        });
+        actions.appendChild(endBtn);
+      }
+      tbody.appendChild(tr);
+    });
+    sessTable.appendChild(table);
+  } catch (e) {
+    sessMsg.textContent = '加载失败：' + e.message;
+    sessMsg.className = 'msg err';
+  }
+}
+
+async function sessAction(endpoint, alias) {
+  sessMsg.textContent = '处理中…'; sessMsg.className = 'msg';
+  try {
+    const r = await fetch(endpoint, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({alias}),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      sessMsg.className = 'msg ok';
+      sessMsg.textContent = `✅ ${endpoint.split('/').pop()} → ${alias} ${d.noop ? '(无变化)' : ''}`;
+      refreshSessions();
+    } else {
+      sessMsg.className = 'msg err';
+      sessMsg.textContent = '失败：' + (d.error || '未知');
+    }
+  } catch (e) {
+    sessMsg.className = 'msg err';
+    sessMsg.textContent = '网络错误：' + e.message;
+  }
+}
 
 // ── Claude Code ────────────────────────────────────────────
 const ccStatus = document.getElementById('cc-status');

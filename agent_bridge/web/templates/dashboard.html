@@ -36,7 +36,16 @@
   header.page h1 { font-size: 26px; margin: 0 0 6px; font-weight: 600; letter-spacing: -0.01em; }
   header.page p { color: var(--muted); margin: 0; font-size: 14px; }
 
+  .section-title { font-size: 12px; font-weight: 600; color: var(--muted);
+                   text-transform: uppercase; letter-spacing: 0.06em;
+                   margin: 28px 0 12px; padding-bottom: 6px;
+                   border-bottom: 1px solid var(--border); }
+  .section-title:first-of-type { margin-top: 0; }
   .grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
+  .card.disabled { opacity: 0.55; }
+  .card.disabled::before { background: #cbd5e1; }
+  .card .soon { font-size: 11px; color: var(--muted); background: #eef2f7;
+                padding: 2px 8px; border-radius: 10px; margin-left: auto; }
   .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
           padding: 20px 22px; display: flex; flex-direction: column; gap: 12px;
           position: relative; overflow: hidden; transition: border-color 0.15s, transform 0.15s; }
@@ -48,9 +57,10 @@
   .card h2 .icon { font-size: 18px; line-height: 1; }
   .card .body { font-size: 13px; color: var(--muted); line-height: 1.55; min-height: 36px; }
   .card .actions { margin-top: auto; display: flex; gap: 8px; flex-wrap: wrap; padding-top: 4px; }
-  #card-chat    { --accent: #3576f5; }
+  #card-claude  { --accent: #8b5cf6; }  /* Claude purple */
+  #card-hermes  { --accent: #f59e0b; }  /* future */
   #card-weixin  { --accent: #10b981; }
-  #card-sessions{ --accent: #f59e0b; }
+  #card-feishu  { --accent: #3576f5; }  /* future */
 
   .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px;
            background: #eef2f7; color: var(--muted); font-weight: 500; }
@@ -113,23 +123,33 @@
     <p>把 Claude Code 作为后端，桥接到浏览器聊天 / 微信等渠道。</p>
   </header>
 
+  <div class="section-title">Backends · AI 后端</div>
   <div class="grid">
-    <!-- 浏览器聊天 -->
-    <div class="card" id="card-chat">
-      <h2><span class="icon">💬</span>浏览器聊天 <span class="badge dim" id="chat-alias">--</span></h2>
-      <div class="body">直接在网页里和 Claude 对话，会话可在多个 alias 间切换。</div>
-      <div class="kv"><span>当前会话</span><b id="chat-current">--</b></div>
-      <div class="kv"><span>在线 sessions</span><b id="chat-online">--</b></div>
+    <!-- Claude Code -->
+    <div class="card" id="card-claude">
+      <h2><span class="icon">🤖</span>Claude Code <span class="badge dim" id="claude-mcp">--</span></h2>
+      <div class="body">本地 Claude Code 子进程通过 MCP 桥接，每个会话一个独立 child claude。</div>
+      <div class="kv"><span>已起 daemon</span><b id="claude-daemons">--</b></div>
+      <div class="kv"><span>已登记会话</span><b id="claude-sessions">--</b></div>
       <div class="actions">
-        <a class="btn" href="/chat">打开聊天</a>
-        <a class="btn secondary" href="#" id="btn-new">开始新会话</a>
+        <a class="btn" href="/settings#claude-code">Claude Code 设置</a>
       </div>
     </div>
 
-    <!-- 微信桥接 -->
+    <!-- Hermes (future) -->
+    <div class="card disabled" id="card-hermes">
+      <h2><span class="icon">⚡</span>Hermes <span class="soon">即将支持</span></h2>
+      <div class="body">基于 API 的轻量后端，用于无需本地 TUI 的场景。</div>
+      <div class="kv"><span>状态</span><b>未启用</b></div>
+    </div>
+  </div>
+
+  <div class="section-title">Channels · 入口渠道</div>
+  <div class="grid">
+    <!-- 微信 -->
     <div class="card" id="card-weixin">
-      <h2><span class="icon">📱</span>微信桥接 <span class="badge dim" id="wx-state">--</span></h2>
-      <div class="body" id="wx-desc">通过 iLink Bot 接入个人微信，对绑定微信号说话即可触达 Claude。</div>
+      <h2><span class="icon">📱</span>微信 <span class="badge dim" id="wx-state">--</span></h2>
+      <div class="body" id="wx-desc">通过 iLink Bot 接入个人微信，对绑定微信号说话即可触达后端。</div>
       <div class="kv"><span>账号</span><b id="wx-account">--</b></div>
       <div class="kv"><span>长轮询</span><b id="wx-polling">--</b></div>
       <div class="actions">
@@ -137,15 +157,11 @@
       </div>
     </div>
 
-    <!-- Sessions -->
-    <div class="card" id="card-sessions">
-      <h2><span class="icon">🗂️</span>会话与项目</h2>
-      <div class="body">每个 alias 对应一个独立的 Claude 子进程与工作目录，可在聊天页 <code>/proj</code> 命令里切换。</div>
-      <div class="kv"><span>已登记 sessions</span><b id="sess-total">--</b></div>
-      <div class="kv"><span>workspace 根</span><b id="sess-roots">--</b></div>
-      <div class="actions">
-        <a class="btn secondary" href="/settings#workspace">工作空间设置</a>
-      </div>
+    <!-- 飞书 (future) -->
+    <div class="card disabled" id="card-feishu">
+      <h2><span class="icon">🪶</span>飞书 <span class="soon">即将支持</span></h2>
+      <div class="body">飞书 Bot 接入，团队场景使用。</div>
+      <div class="kv"><span>状态</span><b>未启用</b></div>
     </div>
   </div>
 
@@ -154,113 +170,39 @@
   </footer>
 </main>
 
-<!-- new-session modal -->
-<div id="modal" class="modal-mask">
-  <div class="modal-box">
-    <h2>开始新会话</h2>
-    <div class="hint">新会话会用 <code>&lt;项目名&gt;-&lt;MMDD-HHMM&gt;</code> 命名。</div>
-    <div class="row">
-      <button type="button" id="m-chat" class="btn secondary" style="flex:1">
-        💬 纯聊天 (cwd = home)
-      </button>
-    </div>
-    <div class="field">
-      <label>或：项目路径</label>
-      <input id="m-cwd" placeholder="D:/aiproject/agent-bridge">
-    </div>
-    <div class="row">
-      <button type="button" id="m-proj" class="btn" style="flex:1">📂 进入项目</button>
-    </div>
-    <div id="m-status" class="msg"></div>
-    <div class="close-row">
-      <button type="button" id="m-cancel" class="btn ghost" style="padding:6px 12px;">取消</button>
-    </div>
-  </div>
-</div>
-
 <script>
 async function refresh() {
   try {
     const r = await fetch('/dashboard/status');
     const d = await r.json();
 
-    // chat card
-    document.getElementById('chat-alias').textContent = d.current || '--';
-    document.getElementById('chat-current').textContent = d.current || '--';
-    document.getElementById('chat-online').textContent =
-      `${d.sessions_online}/${d.sessions_total}`;
+    // claude code card
+    const claudeMcp = document.getElementById('claude-mcp');
+    if (d.claude && d.claude.mcp_registered) {
+      claudeMcp.textContent = 'MCP 已注册'; claudeMcp.className = 'badge on';
+    } else {
+      claudeMcp.textContent = 'MCP 未注册'; claudeMcp.className = 'badge off';
+    }
+    document.getElementById('claude-daemons').textContent =
+      `${d.sessions_online} / ${d.sessions_total}`;
+    document.getElementById('claude-sessions').textContent = d.sessions_total;
 
     // weixin card
     const wxBadge = document.getElementById('wx-state');
     if (d.weixin.connected) {
-      wxBadge.textContent = '已连接';
-      wxBadge.className = 'badge on';
+      wxBadge.textContent = '已连接'; wxBadge.className = 'badge on';
     } else {
-      wxBadge.textContent = '未连接';
-      wxBadge.className = 'badge off';
+      wxBadge.textContent = '未连接'; wxBadge.className = 'badge off';
     }
     document.getElementById('wx-account').textContent = d.weixin.account_id || '--';
     document.getElementById('wx-polling').textContent =
       d.weixin.connected ? (d.weixin.running ? '运行中' : '已停止') : '--';
-
-    // sessions card
-    document.getElementById('sess-total').textContent = d.sessions_total;
-    document.getElementById('sess-roots').textContent =
-      (d.workspace_roots || []).join(' · ') || '--';
   } catch (e) {
     console.error('dashboard refresh failed', e);
   }
 }
 refresh();
 setInterval(refresh, 5000);
-
-// New-session modal wiring
-const modal = document.getElementById('modal');
-const mStatus = document.getElementById('m-status');
-const mCwd = document.getElementById('m-cwd');
-
-function openModal() {
-  modal.classList.add('show');
-  mStatus.textContent = ''; mStatus.className = 'msg';
-  mCwd.value = '';
-}
-function closeModal() { modal.classList.remove('show'); }
-
-document.getElementById('btn-new').addEventListener('click', (e) => {
-  e.preventDefault();
-  openModal();
-});
-document.getElementById('m-cancel').addEventListener('click', closeModal);
-
-async function createSession(mode, project_cwd) {
-  mStatus.textContent = '正在拉起 daemon（最多 15s）…'; mStatus.className = 'msg';
-  try {
-    const r = await fetch('/session/new', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({mode, project_cwd}),
-    });
-    const d = await r.json();
-    if (d.ok) {
-      mStatus.className = 'msg ok';
-      mStatus.textContent = `✅ 已创建 ${d.alias}，跳转中…`;
-      setTimeout(() => { window.location.href = '/chat'; }, 600);
-    } else {
-      mStatus.className = 'msg err';
-      mStatus.textContent = `失败：${d.error || '未知'}` + (d.alias ? ` (alias=${d.alias})` : '');
-    }
-  } catch (e) {
-    mStatus.className = 'msg err';
-    mStatus.textContent = `网络错误：${e.message}`;
-  }
-}
-
-document.getElementById('m-chat').addEventListener('click', () => createSession('chat'));
-document.getElementById('m-proj').addEventListener('click', () => {
-  const cwd = mCwd.value.trim();
-  if (!cwd) { mStatus.textContent = '请输入项目路径'; return; }
-  createSession('project', cwd);
-});
 </script>
 </body>
 </html>

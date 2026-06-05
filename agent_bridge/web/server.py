@@ -37,7 +37,7 @@ from .routes.projects import (
     update_workspace_route,
 )
 from .routes.install_status import install_run, install_status
-from .routes.sessions import list_sessions_route
+from .routes.sessions import end_daemon_route, list_sessions_route, set_current_route
 from .routes.weixin import (
     weixin_disconnect,
     weixin_page,
@@ -87,6 +87,8 @@ app = Starlette(
         Route("/poll", poll),
         Route("/relay-push", relay_push, methods=["POST"]),
         Route("/sessions", list_sessions_route),
+        Route("/session/use", set_current_route, methods=["POST"]),
+        Route("/session/end", end_daemon_route, methods=["POST"]),
         Route("/projects", list_projects_route),
         Route("/config", get_config_route),
         Route("/config/workspace", update_workspace_route, methods=["POST"]),

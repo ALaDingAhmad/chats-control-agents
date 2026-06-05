@@ -59,6 +59,46 @@
   .proj-item .tag.offline { background: #fef3c7; color: #92400e; }
   .proj-item .tag.idle    { background: #eef2f7; color: #64748b; }
   .proj-item .root { font-size: 11px; color: #aaa; font-family: monospace; }
+  /* Toolbar above chat log */
+  .chat-toolbar { display: flex; align-items: center; gap: 8px;
+                  margin: 4px 0 8px; }
+  .chat-toolbar .right { margin-left: auto; }
+  .chat-toolbar button.tbtn { padding: 7px 14px; border: 0; border-radius: 6px;
+                       font-size: 13px; cursor: pointer; background: #3576f5;
+                       color: #fff; font-family: inherit; }
+  .chat-toolbar button.tbtn:hover { background: #2563eb; }
+  .chat-toolbar button.tbtn.secondary { background: #eef2f7; color: #1f2937; }
+  /* Modal */
+  .modal-mask { display: none; position: fixed; inset: 0;
+                background: rgba(15,23,42,0.45); z-index: 99;
+                align-items: center; justify-content: center;
+                backdrop-filter: blur(2px); }
+  .modal-mask.show { display: flex; }
+  .modal-box { background: #fff; border-radius: 10px; padding: 24px 26px;
+               max-width: 440px; width: 90%; border: 1px solid #e2e8f0;
+               box-shadow: 0 12px 40px rgba(15,23,42,0.18); }
+  .modal-box h2 { margin: 0 0 6px; font-size: 16px; font-weight: 600; }
+  .modal-box .hint { font-size: 13px; color: #64748b; margin-bottom: 16px; }
+  .modal-box .field { margin-top: 10px; }
+  .modal-box label { font-size: 12px; color: #64748b; display: block; margin-bottom: 4px; }
+  .modal-box input { width: 100%; padding: 9px 11px; border: 1px solid #e2e8f0;
+                     border-radius: 6px; font-size: 13px; font-family: monospace;
+                     box-sizing: border-box; }
+  .modal-box input:focus { outline: 0; border-color: #3576f5;
+                           box-shadow: 0 0 0 3px rgba(53,118,245,0.12); }
+  .modal-box .row { display: flex; gap: 8px; margin-top: 14px; }
+  .modal-box .row button { flex: 1; padding: 9px 14px; border: 0; border-radius: 6px;
+                            font-size: 13px; cursor: pointer; font-family: inherit; }
+  .modal-box .row button.primary { background: #3576f5; color: #fff; }
+  .modal-box .row button.primary:hover { background: #2563eb; }
+  .modal-box .row button.secondary { background: #eef2f7; color: #1f2937; }
+  .modal-box .row button.secondary:hover { background: #e2e8f0; }
+  .modal-box .msg { font-size: 12px; margin-top: 12px; min-height: 18px; color: #64748b; }
+  .modal-box .msg.err { color: #dc2626; }
+  .modal-box .msg.ok  { color: #16a34a; }
+  .modal-box .close-row { display: flex; justify-content: flex-end; margin-top: 10px; }
+  .modal-box .close-row button { padding: 6px 12px; background: transparent;
+                                  color: #3576f5; border: 0; cursor: pointer; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -82,6 +122,12 @@
       <div class="proj-list" id="proj-list"></div>
     </div>
   </details>
+  <div class="chat-toolbar">
+    <span style="font-size:12px; color:#64748b;">当前会话：<b id="tb-current" style="color:#1f2937">--</b></span>
+    <div class="right">
+      <button type="button" class="tbtn" id="tb-new">+ 开始新会话</button>
+    </div>
+  </div>
   <div id="log"></div>
   <form id="form">
     <input id="input" placeholder="输入消息，回车发送…" autocomplete="off">
@@ -89,6 +135,29 @@
   </form>
   <div id="status"></div>
 </div>
+
+<!-- new-session modal -->
+<div id="modal" class="modal-mask">
+  <div class="modal-box">
+    <h2>开始新会话</h2>
+    <div class="hint">新会话会用 <code>&lt;项目名&gt;-&lt;MMDD-HHMM&gt;</code> 命名。</div>
+    <div class="row">
+      <button type="button" id="m-chat" class="secondary">💬 纯聊天 (cwd = home)</button>
+    </div>
+    <div class="field">
+      <label>或：项目路径</label>
+      <input id="m-cwd" placeholder="D:/aiproject/agent-bridge">
+    </div>
+    <div class="row">
+      <button type="button" id="m-proj" class="primary">📂 进入项目</button>
+    </div>
+    <div id="m-status" class="msg"></div>
+    <div class="close-row">
+      <button type="button" id="m-cancel">取消</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const logEl = document.getElementById('log');
 const formEl = document.getElementById('form');
@@ -268,6 +337,72 @@ fetchHistory().then(items => {
 
 // Eagerly fetch projects on boot so first panel open is instant.
 fetchProjects();
+
+// ── Toolbar: current session label + new-session modal ───────
+const tbCurrentEl = document.getElementById('tb-current');
+async function refreshToolbarCurrent() {
+  try {
+    const r = await fetch('/dashboard/status');
+    const d = await r.json();
+    tbCurrentEl.textContent = d.current || '(无)';
+  } catch (e) { /* silent */ }
+}
+refreshToolbarCurrent();
+setInterval(refreshToolbarCurrent, 5000);
+
+const modal   = document.getElementById('modal');
+const mStatus = document.getElementById('m-status');
+const mCwd    = document.getElementById('m-cwd');
+
+function openModal() {
+  modal.classList.add('show');
+  mStatus.textContent = ''; mStatus.className = 'msg';
+  mCwd.value = '';
+}
+function closeModal() { modal.classList.remove('show'); }
+
+document.getElementById('tb-new').addEventListener('click', openModal);
+document.getElementById('m-cancel').addEventListener('click', closeModal);
+
+async function createSession(mode, project_cwd) {
+  mStatus.textContent = '正在拉起 daemon（最多 15s）…'; mStatus.className = 'msg';
+  try {
+    const r = await fetch('/session/new', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({mode, project_cwd}),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      mStatus.className = 'msg ok';
+      mStatus.textContent = `✅ 已创建 ${d.alias}，加载中…`;
+      // Re-fetch everything: history of new alias, project state, etc.
+      setTimeout(() => {
+        closeModal();
+        refreshToolbarCurrent();
+        fetchHistory();
+        fetchProjects();
+      }, 500);
+    } else {
+      mStatus.className = 'msg err';
+      mStatus.textContent = `失败：${d.error || '未知'}` + (d.alias ? ` (alias=${d.alias})` : '');
+    }
+  } catch (e) {
+    mStatus.className = 'msg err';
+    mStatus.textContent = `网络错误：${e.message}`;
+  }
+}
+
+document.getElementById('m-chat').addEventListener('click', () => createSession('chat'));
+document.getElementById('m-proj').addEventListener('click', () => {
+  const cwd = mCwd.value.trim();
+  if (!cwd) {
+    mStatus.className = 'msg err';
+    mStatus.textContent = '请输入项目路径';
+    return;
+  }
+  createSession('project', cwd);
+});
 </script>
 </body>
 </html>
