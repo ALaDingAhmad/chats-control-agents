@@ -265,9 +265,13 @@ async def _outbox_watcher(account: dict):
                     peer = (_wx.get("alias_peer") or {}).get(alias)
                     if not peer:
                         # No WeChat user has spoken into this session yet —
-                        # browser still gets it via /poll. Mark seen so we
-                        # don't re-check forever.
-                        _outbox_seen[alias] = fp
+                        # browser still gets it via /poll. Do NOT mark seen:
+                        # if/when a peer later writes in, we want this reply
+                        # to be forwarded then. Skipping send_text is cheap
+                        # (no network call), so re-checking each loop iter
+                        # is fine. Watch out for one edge: outbox.txt that
+                        # gets overwritten in the meantime — fp changes too,
+                        # so the new one will be forwarded normally.
                         continue
                     ctx_tok = wxs.get_context_token(peer)
                     try:
