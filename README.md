@@ -13,19 +13,24 @@ channel can talk to that AI.
 # 1. Install deps
 pip install -r requirements.txt
 
-# 2. Configure workspace roots (where /proj scans)
+# 2. Install the Claude Code artefacts (MCP server, skill, hook)
+#    See install/README.md for details.
+python install/install.py
+
+# 3. Configure workspace roots (where /proj scans)
 #    Default ["D:/aiproject", "F:/wslshare"] — edit config.json if needed.
 
-# 3. Start the web server
+# 4. Start the web server
 python -m agent_bridge.web.server
 # → http://127.0.0.1:8765/
 
-# 4. (Optional) Connect WeChat
+# 5. (Optional) Connect WeChat
 #    Open http://127.0.0.1:8765/weixin → scan QR with your phone WeChat.
 
-# 5. Spawn a Claude Code session for some project
-#    Either via /proj in the chat UI (recommended), or manually:
-python -m agent_bridge.backends.claude_code.daemon <alias> <cwd>
+# 6. Spawn a Claude Code session for some project
+#    Either via the dashboard "开始新会话" button, /proj in chat, or manually:
+python -m agent_bridge.backends.claude_code.daemon [<alias>] [<cwd>]
+# (alias auto-derives as <basename(cwd)>-<MMDD-HHMM> if omitted)
 ```
 
 ## In-chat commands
