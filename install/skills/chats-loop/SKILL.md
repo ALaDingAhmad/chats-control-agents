@@ -12,7 +12,7 @@ description: |-
 
   English: "start chats-loop", "begin chats-loop", "open chats-loop",
   "enter chats-loop", "launch chats-loop", "activate chats-loop", "run chats-loop",
-  "/chats-loop", "/webrelay".
+  "/chats-loop", "/chatsloop".
 
   Chinese: "启动 chats-loop", "进入 chats-loop", "调用 chats-loop",
   "开启 chats-loop", "开始 chats-loop", "运行 chats-loop", "激活 chats-loop".
