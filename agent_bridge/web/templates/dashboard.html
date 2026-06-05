@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agent Bridge</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; background: #f5f5f5; margin: 0; color: #222; }
+  #app { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { margin-bottom: 24px; }
+  header h1 { font-size: 22px; margin: 0 0 6px; font-weight: 600; }
+  header p { color: #666; margin: 0; font-size: 14px; line-height: 1.5; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .card { background: #fff; border: 1px solid #e3e3e3; border-radius: 8px; padding: 18px 20px;
+          display: flex; flex-direction: column; gap: 10px; }
+  .card h2 { font-size: 15px; margin: 0; font-weight: 600; }
+  .card .body { font-size: 13px; color: #555; line-height: 1.5; min-height: 36px; }
+  .card .actions { margin-top: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px;
+           background: #eee; color: #555; }
+  .badge.on  { background: #d4edda; color: #155724; }
+  .badge.off { background: #f8d7da; color: #721c24; }
+  .badge.dim { background: #e7ecf3; color: #4b5b6b; }
+  a.btn { display: inline-block; padding: 7px 14px; border-radius: 6px; font-size: 13px;
+          text-decoration: none; background: #007aff; color: #fff; }
+  a.btn.secondary { background: #6c757d; }
+  a.btn:hover { opacity: 0.9; }
+  .kv { display: flex; justify-content: space-between; font-size: 12px; color: #666;
+        padding: 3px 0; border-top: 1px dashed #eee; }
+  .kv:first-of-type { border-top: 0; }
+  .kv b { color: #222; font-weight: 500; }
+  footer { margin-top: 32px; font-size: 12px; color: #999; text-align: center; }
+  footer code { background: #eee; padding: 1px 6px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Agent Bridge</h1>
+    <p>把 Claude Code 作为后端，桥接到浏览器聊天 / 微信等渠道。下面是各服务的状态与入口。</p>
+  </header>
+
+  <div class="grid">
+    <!-- 浏览器聊天 -->
+    <div class="card" id="card-chat">
+      <h2>浏览器聊天 <span class="badge dim" id="chat-alias">--</span></h2>
+      <div class="body">直接在网页里和 Claude 对话，会话可在多个 alias 间切换。</div>
+      <div class="kv"><span>当前会话</span><b id="chat-current">--</b></div>
+      <div class="kv"><span>在线 sessions</span><b id="chat-online">--</b></div>
+      <div class="actions">
+        <a class="btn" href="/chat">打开聊天</a>
+      </div>
+    </div>
+
+    <!-- 微信桥接 -->
+    <div class="card" id="card-weixin">
+      <h2>微信桥接 <span class="badge dim" id="wx-state">--</span></h2>
+      <div class="body" id="wx-desc">通过 iLink Bot 接入个人微信，对绑定微信号说话即可触达 Claude。</div>
+      <div class="kv"><span>账号</span><b id="wx-account">--</b></div>
+      <div class="kv"><span>长轮询</span><b id="wx-polling">--</b></div>
+      <div class="actions">
+        <a class="btn" href="/weixin">管理微信</a>
+      </div>
+    </div>
+
+    <!-- Sessions -->
+    <div class="card" id="card-sessions">
+      <h2>会话与项目</h2>
+      <div class="body">每个 alias 对应一个独立的 Claude 子进程与工作目录，可在聊天页 <code>/proj</code> 命令里切换。</div>
+      <div class="kv"><span>已登记 sessions</span><b id="sess-total">--</b></div>
+      <div class="kv"><span>workspace 根</span><b id="sess-roots">--</b></div>
+      <div class="actions">
+        <a class="btn secondary" href="/sessions">查看 sessions JSON</a>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    日志：<code>web_server.log</code> · 端口 <code>127.0.0.1:8765</code>
+  </footer>
+</div>
+
+<script>
+async function refresh() {
+  try {
+    const r = await fetch('/dashboard/status');
+    const d = await r.json();
+
+    // chat card
+    document.getElementById('chat-alias').textContent = d.current || '--';
+    document.getElementById('chat-current').textContent = d.current || '--';
+    document.getElementById('chat-online').textContent =
+      `${d.sessions_online}/${d.sessions_total}`;
+
+    // weixin card
+    const wxBadge = document.getElementById('wx-state');
+    if (d.weixin.connected) {
+      wxBadge.textContent = '已连接';
+      wxBadge.className = 'badge on';
+    } else {
+      wxBadge.textContent = '未连接';
+      wxBadge.className = 'badge off';
+    }
+    document.getElementById('wx-account').textContent = d.weixin.account_id || '--';
+    document.getElementById('wx-polling').textContent =
+      d.weixin.connected ? (d.weixin.running ? '运行中' : '已停止') : '--';
+
+    // sessions card
+    document.getElementById('sess-total').textContent = d.sessions_total;
+    document.getElementById('sess-roots').textContent =
+      (d.workspace_roots || []).join(' · ') || '--';
+  } catch (e) {
+    console.error('dashboard refresh failed', e);
+  }
+}
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

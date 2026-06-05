@@ -15,20 +15,57 @@ from ..helpers import load_history, now_iso, save_history
 log = logging.getLogger("web.chat")
 
 
-# HTML page lazy-loaded from templates/ on first request
-_INDEX_HTML_PATH = Path(__file__).resolve().parents[1] / "templates" / "index.html"
+# HTML pages lazy-loaded from templates/ on first request
+_TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
 _INDEX_HTML: str | None = None
+_DASHBOARD_HTML: str | None = None
 
 
 def _index_html() -> str:
     global _INDEX_HTML
     if _INDEX_HTML is None:
-        _INDEX_HTML = _INDEX_HTML_PATH.read_text(encoding="utf-8")
+        _INDEX_HTML = (_TEMPLATES_DIR / "index.html").read_text(encoding="utf-8")
     return _INDEX_HTML
 
 
+def _dashboard_html() -> str:
+    global _DASHBOARD_HTML
+    if _DASHBOARD_HTML is None:
+        _DASHBOARD_HTML = (_TEMPLATES_DIR / "dashboard.html").read_text(encoding="utf-8")
+    return _DASHBOARD_HTML
+
+
 async def index(request):
+    """Chat UI, served from / by legacy code and now from /chat."""
     return HTMLResponse(_index_html())
+
+
+async def dashboard(request):
+    """Service overview landing page, served from /."""
+    return HTMLResponse(_dashboard_html())
+
+
+async def dashboard_status(request):
+    """Aggregated state for the dashboard cards. Keeps the page to one
+    request instead of fanning out to /sessions + /weixin/status + /config."""
+    from ...channels.weixin import state as wxs
+    from ...core import config as cfg
+    from ..weixin_runtime import get_wx_state
+    sessions = sx.list_sessions()
+    online = sum(1 for s in sessions if s.get("online"))
+    acct = wxs.load_account()
+    wx_state = get_wx_state()
+    return JSONResponse({
+        "current": sx.get_current(),
+        "sessions_total": len(sessions),
+        "sessions_online": online,
+        "weixin": {
+            "connected": bool(acct and acct.get("bot_token")),
+            "running": wx_state.get("running", False),
+            "account_id": (acct or {}).get("ilink_bot_id"),
+        },
+        "workspace_roots": [str(r) for r in cfg.get_workspace_roots()],
+    })
 
 
 async def get_history(request):

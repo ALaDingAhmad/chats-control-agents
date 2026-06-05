@@ -21,6 +21,8 @@ from ..core import sessions as sx
 from ..core.paths import ROOT
 from .autospawn import autospawn_worker
 from .routes.chat import (
+    dashboard,
+    dashboard_status,
     get_history,
     index,
     poll,
@@ -72,7 +74,9 @@ async def _lifespan(app):
 
 app = Starlette(
     routes=[
-        Route("/", index),
+        Route("/", dashboard),
+        Route("/chat", index),
+        Route("/dashboard/status", dashboard_status),
         Route("/history", get_history),
         Route("/send", send_message, methods=["POST"]),
         Route("/poll", poll),
