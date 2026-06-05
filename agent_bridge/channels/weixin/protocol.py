@@ -7,8 +7,11 @@ Only what we need is ported here:
   - Long-poll getupdates for inbound text messages
   - sendmessage for outbound text replies (with context_token echo)
 
-Skipped intentionally: media upload/download, AES CDN protocol, typing
-indicators, markdown formatting, message dedup, group policy gates.
+Skipped intentionally: media upload/download, AES CDN protocol, markdown
+formatting, message dedup, group policy gates.
+
+Typing indicators ARE supported (the "对方正在输入..." bubble) — they
+piggy-back on a per-peer typing_ticket fetched from getconfig.
 
 Reference upstream: F:/wslshare/hermes-agent/gateway/platforms/weixin.py
 """
@@ -43,15 +46,22 @@ EP_GET_QR = "ilink/bot/get_bot_qrcode"
 EP_QR_STATUS = "ilink/bot/get_qrcode_status"
 EP_GET_UPDATES = "ilink/bot/getupdates"
 EP_SEND_MESSAGE = "ilink/bot/sendmessage"
+EP_GET_CONFIG = "ilink/bot/getconfig"
+EP_SEND_TYPING = "ilink/bot/sendtyping"
 
 # Message-shape constants from upstream
 MSG_TYPE_BOT = 2
 MSG_STATE_FINISH = 2
 ITEM_TEXT = 1
 
+# Typing indicator status codes
+TYPING_START = 1
+TYPING_STOP = 2
+
 LONG_POLL_TIMEOUT_MS = 35_000
 API_TIMEOUT_MS = 15_000
 QR_TIMEOUT_MS = 35_000
+CONFIG_TIMEOUT_MS = 10_000
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -239,6 +249,62 @@ async def send_text(
         payload={"msg": msg},
         token=token,
         timeout_ms=API_TIMEOUT_MS,
+    )
+
+
+# ── Typing indicator ─────────────────────────────────────────────────────
+async def get_config(
+    session: aiohttp.ClientSession,
+    *,
+    base_url: str,
+    token: str,
+    user_id: str,
+    context_token: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Fetch per-peer config (mainly to get typing_ticket).
+
+    Returns the raw upstream dict; `typing_ticket` is the field we care
+    about. context_token should be the latest one for this peer.
+    """
+    payload: Dict[str, Any] = {"ilink_user_id": user_id}
+    if context_token:
+        payload["context_token"] = context_token
+    return await _post_json(
+        session,
+        base_url=base_url,
+        endpoint=EP_GET_CONFIG,
+        payload=payload,
+        token=token,
+        timeout_ms=CONFIG_TIMEOUT_MS,
+    )
+
+
+async def send_typing(
+    session: aiohttp.ClientSession,
+    *,
+    base_url: str,
+    token: str,
+    to_user_id: str,
+    typing_ticket: str,
+    status: int,
+) -> Dict[str, Any]:
+    """Show / hide the '对方正在输入...' bubble for a peer.
+
+    status: TYPING_START (1) or TYPING_STOP (2).
+    The indicator expires client-side after ~5s, so the caller is expected
+    to re-send TYPING_START periodically while the bot is still composing.
+    """
+    return await _post_json(
+        session,
+        base_url=base_url,
+        endpoint=EP_SEND_TYPING,
+        payload={
+            "ilink_user_id": to_user_id,
+            "typing_ticket": typing_ticket,
+            "status": status,
+        },
+        token=token,
+        timeout_ms=CONFIG_TIMEOUT_MS,
     )
 
 

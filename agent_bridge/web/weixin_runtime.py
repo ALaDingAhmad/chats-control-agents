@@ -41,6 +41,15 @@ _wx: dict = {
 # Per-alias outbox-watcher fingerprint memo (so we don't re-forward the same reply)
 _outbox_seen: dict[str, str] = {}
 
+# Per-peer typing-ticket cache (peer_id → (ticket, expires_at)). The bubble
+# itself expires client-side after ~5s, so we keep tickets for 10 min and
+# rely on _typing_keepalive_loop to re-send TYPING_START every few seconds.
+_TYPING_TICKET_TTL = 600.0
+_TYPING_KEEPALIVE_INTERVAL = 3.0   # < 5s so the bubble never blinks off
+_TYPING_MAX_DURATION = 300.0       # safety cap — don't keepalive forever
+_typing_tickets: dict[str, tuple[str, float]] = {}
+_typing_tasks: dict[str, asyncio.Task] = {}
+
 
 def get_wx_state() -> dict:
     return _wx
@@ -54,6 +63,13 @@ def cancel_tasks_named(*names: str) -> None:
         else:
             keep.append(t)
     _wx["tasks"] = keep
+    # If we're tearing down longpoll/outbox_watch, any typing keepalive is
+    # also stale — cancel them so they don't keep poking iLink in the dark.
+    if "longpoll" in names or "outbox_watch" in names:
+        for peer, t in list(_typing_tasks.items()):
+            if not t.done():
+                t.cancel()
+            _typing_tasks.pop(peer, None)
 
 
 def start_runtime_tasks(account: dict) -> None:
@@ -248,12 +264,117 @@ async def _inbound_longpoll(account: dict):
                         "source": f"weixin:{sender[:8]}",
                     })
                     save_history(history, alias)
+                    # Show "对方正在输入..." while Claude composes. Keepalive
+                    # task auto-resends every 3s; outbox_watcher stops it.
+                    await _start_typing(
+                        session, base_url=base_url, token=token,
+                        peer=sender, ctx_tok=ctx_tok,
+                    )
     except asyncio.CancelledError:
         log.info("longpoll cancelled")
         raise
     except Exception as e:
         log.exception("longpoll crashed: %s", e)
         _wx["running"] = False
+
+
+# ── Typing indicator ─────────────────────────────────────────────────────
+async def _fetch_typing_ticket(
+    session, *, base_url: str, token: str, peer: str, ctx_tok: str | None,
+) -> str | None:
+    """Best-effort fetch + cache. Returns None on failure — typing is purely
+    cosmetic, callers should not block on it."""
+    cached = _typing_tickets.get(peer)
+    if cached and cached[1] > asyncio.get_event_loop().time():
+        return cached[0]
+    try:
+        resp = await wx.get_config(
+            session, base_url=base_url, token=token,
+            user_id=peer, context_token=ctx_tok,
+        )
+        ticket = str(resp.get("typing_ticket") or "")
+        if ticket:
+            _typing_tickets[peer] = (ticket, asyncio.get_event_loop().time() + _TYPING_TICKET_TTL)
+            return ticket
+    except Exception as e:
+        log.debug("typing: getconfig failed peer=%s: %s", peer[:8], e)
+    return None
+
+
+async def _typing_keepalive_loop(
+    session, *, base_url: str, token: str, peer: str, ticket: str,
+) -> None:
+    """Re-send TYPING_START every few seconds until cancelled. Bubble lifetime
+    on the WeChat client is ~5s so we tick at 3s."""
+    elapsed = 0.0
+    try:
+        while elapsed < _TYPING_MAX_DURATION:
+            try:
+                await wx.send_typing(
+                    session, base_url=base_url, token=token,
+                    to_user_id=peer, typing_ticket=ticket, status=wx.TYPING_START,
+                )
+            except Exception as e:
+                log.debug("typing: keepalive send failed peer=%s: %s", peer[:8], e)
+            await asyncio.sleep(_TYPING_KEEPALIVE_INTERVAL)
+            elapsed += _TYPING_KEEPALIVE_INTERVAL
+    except asyncio.CancelledError:
+        raise
+
+
+async def _start_typing(
+    session, *, base_url: str, token: str, peer: str, ctx_tok: str | None,
+) -> None:
+    """Begin showing '对方正在输入...' for peer. Idempotent — replaces any
+    existing keepalive task for the same peer."""
+    # Cancel any existing keepalive for this peer first (could be stale)
+    existing = _typing_tasks.get(peer)
+    if existing and not existing.done():
+        existing.cancel()
+    ticket = await _fetch_typing_ticket(
+        session, base_url=base_url, token=token, peer=peer, ctx_tok=ctx_tok,
+    )
+    if not ticket:
+        return
+    try:
+        await wx.send_typing(
+            session, base_url=base_url, token=token,
+            to_user_id=peer, typing_ticket=ticket, status=wx.TYPING_START,
+        )
+    except Exception as e:
+        log.debug("typing: initial start failed peer=%s: %s", peer[:8], e)
+        return
+    t = asyncio.create_task(
+        _typing_keepalive_loop(
+            session, base_url=base_url, token=token, peer=peer, ticket=ticket,
+        ),
+        name=f"typing_{peer[:8]}",
+    )
+    _typing_tasks[peer] = t
+
+
+async def _stop_typing(
+    session, *, base_url: str, token: str, peer: str,
+) -> None:
+    """End the typing indicator. Safe to call when no indicator is active."""
+    task = _typing_tasks.pop(peer, None)
+    if task and not task.done():
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+    cached = _typing_tickets.get(peer)
+    if not cached:
+        return
+    ticket = cached[0]
+    try:
+        await wx.send_typing(
+            session, base_url=base_url, token=token,
+            to_user_id=peer, typing_ticket=ticket, status=wx.TYPING_STOP,
+        )
+    except Exception as e:
+        log.debug("typing: stop failed peer=%s: %s", peer[:8], e)
 
 
 # ── Outbox watcher (per-alias outbound) ──────────────────────────────────
@@ -313,6 +434,11 @@ async def _outbox_watcher(account: dict):
                                      alias, peer[:8], len(reply))
                     except Exception as e:
                         log.warning("send_text failed: %s", e)
+                    # Stop the typing bubble regardless of send result —
+                    # leaving it on after a failed send would be misleading.
+                    await _stop_typing(
+                        session, base_url=base_url, token=token, peer=peer,
+                    )
                     _outbox_seen[alias] = fp
     except asyncio.CancelledError:
         log.info("outbox_watcher cancelled")
