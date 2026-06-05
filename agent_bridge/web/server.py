@@ -29,6 +29,7 @@ from .routes.chat import (
     poll,
     relay_push,
     send_message,
+    settings,
 )
 from .routes.projects import (
     get_config_route,
@@ -77,6 +78,7 @@ app = Starlette(
     routes=[
         Route("/", dashboard),
         Route("/chat", index),
+        Route("/settings", settings),
         Route("/dashboard/status", dashboard_status),
         Route("/session/new", new_session, methods=["POST"]),
         Route("/history", get_history),

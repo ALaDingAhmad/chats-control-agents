@@ -62,21 +62,22 @@
 </style>
 </head>
 <body>
-<div id="app">
-  <div style="font-size:12px; color:#888; margin-bottom:6px;">
-    <a href="/" style="color:#888; text-decoration:none;">← 返回 dashboard</a>
+<nav style="background:#fff; border-bottom:1px solid #e2e8f0; padding:12px 24px;
+            display:flex; align-items:center; gap:16px;">
+  <span style="font-weight:600; font-size:15px;">Agent Bridge</span>
+  <div style="margin-left:auto; display:flex; gap:4px;">
+    <a href="/"         style="color:#64748b; text-decoration:none; padding:6px 12px; border-radius:6px; font-size:13px;">Dashboard</a>
+    <a href="/chat"     style="color:#3576f5; background:rgba(53,118,245,0.08); text-decoration:none; padding:6px 12px; border-radius:6px; font-size:13px;">聊天</a>
+    <a href="/settings" style="color:#64748b; text-decoration:none; padding:6px 12px; border-radius:6px; font-size:13px;">设置</a>
   </div>
+</nav>
+<div id="app">
   <details class="panel" id="ws-panel">
-    <summary>⚙️ 工作空间与项目（点击展开）</summary>
+    <summary>📁 项目列表（点击展开 · 用 <code>/proj</code> 命令也能拉起）</summary>
     <div style="margin-top: 6px;">
-      <div style="font-size: 12px; color: #888;">配置工作空间根目录，/proj 命令会扫描这些目录下的子目录。</div>
-      <div class="ws-list" id="ws-list"></div>
-      <div class="ws-actions">
-        <button type="button" class="add" id="ws-add">+ 添加目录</button>
-        <button type="button" class="primary" id="ws-save">保存</button>
+      <div style="font-size: 12px; color: #888;">
+        工作空间根目录的编辑搬到了 <a href="/settings#workspace" style="color:#3576f5;">设置 · 工作空间</a>。
       </div>
-      <div class="ws-msg" id="ws-msg"></div>
-
       <div class="proj-current" id="proj-current"></div>
       <div class="proj-list" id="proj-list"></div>
     </div>
@@ -174,87 +175,10 @@ formEl.addEventListener('submit', (e) => {
   send(text);
 });
 
-// ── Workspace + projects panel ─────────────────────────────────────────
-const wsListEl = document.getElementById('ws-list');
-const wsAddBtn = document.getElementById('ws-add');
-const wsSaveBtn = document.getElementById('ws-save');
-const wsMsgEl = document.getElementById('ws-msg');
+// ── Projects panel ─────────────────────────────────────────────────────
 const projCurrentEl = document.getElementById('proj-current');
 const projListEl = document.getElementById('proj-list');
 const wsPanel = document.getElementById('ws-panel');
-
-let _wsExisting = new Set();  // lowercase paths that actually exist on disk
-
-function renderWorkspaceEditor(roots) {
-  wsListEl.innerHTML = '';
-  for (const r of roots) {
-    addWorkspaceRow(r);
-  }
-}
-
-function addWorkspaceRow(value) {
-  const row = document.createElement('div');
-  row.className = 'ws-row';
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.value = value || '';
-  input.placeholder = '例如 D:/aiproject 或 /home/user/projects';
-  if (value && !_wsExisting.has(value.toLowerCase().replace(/\\\\/g, '/').replace(/\\/$/, ''))) {
-    input.classList.add('missing');
-    input.title = '该目录在磁盘上不存在';
-  }
-  const del = document.createElement('button');
-  del.type = 'button';
-  del.className = 'del';
-  del.textContent = '删除';
-  del.addEventListener('click', () => row.remove());
-  row.appendChild(input);
-  row.appendChild(del);
-  wsListEl.appendChild(row);
-  if (!value) input.focus();
-}
-
-wsAddBtn.addEventListener('click', () => addWorkspaceRow(''));
-
-wsSaveBtn.addEventListener('click', async () => {
-  const inputs = wsListEl.querySelectorAll('input');
-  const roots = Array.from(inputs).map(i => i.value.trim()).filter(v => v);
-  wsMsgEl.className = 'ws-msg';
-  wsMsgEl.textContent = '保存中…';
-  try {
-    const r = await fetch('/config/workspace', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({workspace_roots: roots}),
-    });
-    const data = await r.json();
-    if (!data.ok) {
-      wsMsgEl.className = 'ws-msg err';
-      wsMsgEl.textContent = '保存失败：' + (data.reason || '未知错误');
-      return;
-    }
-    wsMsgEl.className = 'ws-msg ok';
-    wsMsgEl.textContent = `已保存 ${data.workspace_roots.length} 个目录（其中 ${data.existing.length} 个有效）`;
-    _wsExisting = new Set(data.existing.map(p => p.toLowerCase().replace(/\\\\/g, '/').replace(/\\/$/, '')));
-    renderWorkspaceEditor(data.workspace_roots);
-    fetchProjects();  // refresh project list with new roots
-  } catch (e) {
-    wsMsgEl.className = 'ws-msg err';
-    wsMsgEl.textContent = '保存失败：' + e.message;
-  }
-});
-
-async function fetchConfig() {
-  try {
-    const r = await fetch('/config');
-    const data = await r.json();
-    _wsExisting = new Set(data.existing.map(p => p.toLowerCase().replace(/\\\\/g, '/').replace(/\\/$/, '')));
-    renderWorkspaceEditor(data.workspace_roots);
-  } catch (e) {
-    wsMsgEl.className = 'ws-msg err';
-    wsMsgEl.textContent = '读取配置失败：' + e.message;
-  }
-}
 
 async function fetchProjects() {
   try {
@@ -332,10 +256,7 @@ async function pickProject(n, p) {
 
 // Refresh project state whenever the panel is opened
 wsPanel.addEventListener('toggle', () => {
-  if (wsPanel.open) {
-    fetchConfig();
-    fetchProjects();
-  }
+  if (wsPanel.open) fetchProjects();
 });
 
 // Boot: render history once, then start permanent poll loop so messages
@@ -345,8 +266,7 @@ fetchHistory().then(items => {
   startPoll();
 });
 
-// Eagerly fetch config + projects on boot so first panel open is instant.
-fetchConfig();
+// Eagerly fetch projects on boot so first panel open is instant.
 fetchProjects();
 </script>
 </body>

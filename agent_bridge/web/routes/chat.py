@@ -19,6 +19,7 @@ log = logging.getLogger("web.chat")
 _TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
 _INDEX_HTML: str | None = None
 _DASHBOARD_HTML: str | None = None
+_SETTINGS_HTML: str | None = None
 
 
 def _index_html() -> str:
@@ -35,6 +36,13 @@ def _dashboard_html() -> str:
     return _DASHBOARD_HTML
 
 
+def _settings_html() -> str:
+    global _SETTINGS_HTML
+    if _SETTINGS_HTML is None:
+        _SETTINGS_HTML = (_TEMPLATES_DIR / "settings.html").read_text(encoding="utf-8")
+    return _SETTINGS_HTML
+
+
 async def index(request):
     """Chat UI, served from / by legacy code and now from /chat."""
     return HTMLResponse(_index_html())
@@ -43,6 +51,11 @@ async def index(request):
 async def dashboard(request):
     """Service overview landing page, served from /."""
     return HTMLResponse(_dashboard_html())
+
+
+async def settings(request):
+    """Tabbed settings page: workspace, weixin, system."""
+    return HTMLResponse(_settings_html())
 
 
 async def new_session(request):
