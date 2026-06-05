@@ -21,16 +21,22 @@
   body { font-family: -apple-system, "Segoe UI", "PingFang SC", sans-serif;
          background: var(--bg); color: var(--text); margin: 0; line-height: 1.5; }
   nav.top { background: var(--panel); border-bottom: 1px solid var(--border);
-            padding: 12px 24px; display: flex; align-items: center; gap: 16px; }
-  nav.top .brand { font-weight: 600; font-size: 15px; }
-  nav.top .links { margin-left: auto; display: flex; gap: 4px; }
-  nav.top a { color: var(--muted); text-decoration: none; padding: 6px 12px;
-              border-radius: 6px; font-size: 13px; }
-  nav.top a:hover { background: var(--bg); color: var(--text); }
-  nav.top a.active { color: var(--primary); background: rgba(53, 118, 245, 0.08); }
-  main { max-width: 880px; margin: 0 auto; padding: 24px 16px 48px; }
-  h1 { font-size: 22px; margin: 0 0 4px; font-weight: 600; }
-  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+            padding: 12px 24px; display: flex; align-items: center; gap: 16px;
+            position: sticky; top: 0; z-index: 10; }
+  nav.top .brand { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  nav.top .brand::before { content: ""; display: inline-block; width: 8px; height: 8px;
+                           border-radius: 50%; background: var(--primary); }
+  nav.top .links { margin-left: auto; display: flex; gap: 2px; }
+  nav.top a { color: var(--muted); text-decoration: none; padding: 8px 14px;
+              font-size: 13px; position: relative; transition: color 0.15s; }
+  nav.top a:hover { color: var(--text); }
+  nav.top a.active { color: var(--primary); font-weight: 500; }
+  nav.top a.active::after { content: ""; position: absolute; left: 14px; right: 14px;
+                            bottom: -13px; height: 2px; background: var(--primary);
+                            border-radius: 2px; }
+  main { max-width: 880px; margin: 0 auto; padding: 32px 20px 48px; }
+  h1 { font-size: 26px; margin: 0 0 6px; font-weight: 600; letter-spacing: -0.01em; }
+  .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
 
   .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border);
           margin-bottom: 20px; }
@@ -51,9 +57,11 @@
 
   .ws-list { margin: 8px 0; display: flex; flex-direction: column; gap: 6px; }
   .ws-item { display: flex; gap: 8px; align-items: center; }
-  .ws-item input { flex: 1; padding: 8px 10px; border: 1px solid var(--border);
-                   border-radius: 6px; font-size: 13px; font-family: monospace; }
-  .ws-item input:focus { outline: 0; border-color: var(--primary); }
+  .ws-item input { flex: 1; padding: 8px 11px; border: 1px solid var(--border);
+                   border-radius: 6px; font-size: 13px; font-family: monospace;
+                   transition: border-color 0.15s, box-shadow 0.15s; }
+  .ws-item input:focus { outline: 0; border-color: var(--primary);
+                         box-shadow: 0 0 0 3px rgba(53,118,245,0.12); }
   .ws-item .tag { font-size: 11px; padding: 2px 8px; border-radius: 4px;
                   background: #eef2f7; color: var(--muted); }
   .ws-item .tag.exists { background: #dcfce7; color: #166534; }
@@ -113,9 +121,10 @@
   <div class="subtitle">配置工作空间、渠道凭据与系统行为。</div>
 
   <div class="tabs">
-    <a href="#workspace" data-tab="workspace" class="active">工作空间</a>
-    <a href="#weixin"    data-tab="weixin">微信</a>
-    <a href="#system"    data-tab="system">系统</a>
+    <a href="#workspace"   data-tab="workspace" class="active">工作空间</a>
+    <a href="#weixin"      data-tab="weixin">微信</a>
+    <a href="#claude-code" data-tab="claude-code">Claude Code</a>
+    <a href="#system"      data-tab="system">系统</a>
   </div>
 
   <!-- ─── 工作空间 ─────────────────────────────────────────── -->
@@ -147,6 +156,28 @@
     </div>
   </section>
 
+  <!-- ─── Claude Code ─────────────────────────────────────── -->
+  <section class="tab" id="tab-claude-code">
+    <div class="card">
+      <h2>支持文件安装状态</h2>
+      <div class="hint">Agent Bridge 需要三件东西装在 <code>~/.claude/</code> 才能让 Claude Code 接入：
+        web-chat MCP 服务、web-relay skill、PreToolUse hook。点检查能看到当前状态，点安装会用 <code>install/install.py</code> 一键 merge 进去。</div>
+      <div class="status-row" id="cc-status">点"检查"查看状态…</div>
+      <pre id="cc-output" style="background:#0f172a; color:#e2e8f0; padding:14px;
+              border-radius:6px; font-size:12px; line-height:1.55; margin-top:14px;
+              max-height:280px; overflow:auto; display:none; font-family: monospace;
+              white-space: pre-wrap;"></pre>
+      <div class="actions">
+        <button type="button" class="primary" id="cc-check">检查</button>
+        <button type="button" class="secondary" id="cc-install-all">安装/更新全部</button>
+        <button type="button" class="secondary" id="cc-install-mcp">仅 MCP</button>
+        <button type="button" class="secondary" id="cc-install-skill">仅 Skill</button>
+        <button type="button" class="secondary" id="cc-install-hook">仅 Hook</button>
+      </div>
+      <div class="msg" id="cc-msg"></div>
+    </div>
+  </section>
+
   <!-- ─── 系统 ────────────────────────────────────────────── -->
   <section class="tab" id="tab-system">
     <div class="card">
@@ -170,9 +201,10 @@ function setActiveTab(name) {
     s.classList.toggle('active', s.id === 'tab-' + name);
   });
   // Load on demand
-  if (name === 'workspace') refreshWorkspace();
-  if (name === 'weixin')    refreshWeixin();
-  if (name === 'system')    refreshSystem();
+  if (name === 'workspace')   refreshWorkspace();
+  if (name === 'weixin')      refreshWeixin();
+  if (name === 'claude-code') refreshClaudeCode();
+  if (name === 'system')      refreshSystem();
 }
 document.querySelectorAll('.tabs a').forEach(a => {
   a.addEventListener('click', (e) => {
@@ -182,7 +214,7 @@ document.querySelectorAll('.tabs a').forEach(a => {
   });
 });
 const initial = (location.hash || '#workspace').slice(1);
-setActiveTab(['workspace','weixin','system'].includes(initial) ? initial : 'workspace');
+setActiveTab(['workspace','weixin','claude-code','system'].includes(initial) ? initial : 'workspace');
 
 // ── Workspace ────────────────────────────────────────────────
 const wsList = document.getElementById('ws-list');
@@ -345,6 +377,73 @@ wxStop.addEventListener('click', async () => {
 setInterval(() => {
   if (document.getElementById('tab-weixin').classList.contains('active')) refreshWeixin();
 }, 5000);
+
+// ── Claude Code ────────────────────────────────────────────
+const ccStatus = document.getElementById('cc-status');
+const ccOutput = document.getElementById('cc-output');
+const ccMsg    = document.getElementById('cc-msg');
+
+function renderInstallOutput(d) {
+  ccOutput.style.display = 'block';
+  ccOutput.textContent = d.output || '(no output)';
+  if (d.needs_install) {
+    ccStatus.className = 'status-row error';
+    ccStatus.textContent = '⚠️ 有组件需要安装或更新';
+  } else if (d.ok) {
+    ccStatus.className = 'status-row connected';
+    ccStatus.textContent = '✓ 三件支持文件都是最新的';
+  } else {
+    ccStatus.className = 'status-row error';
+    ccStatus.textContent = `安装器返回 rc=${d.rc}`;
+  }
+}
+
+async function refreshClaudeCode() {
+  ccStatus.className = 'status-row';
+  ccStatus.textContent = '检查中…';
+  ccMsg.textContent = '';
+  try {
+    const r = await fetch('/install/status');
+    const d = await r.json();
+    renderInstallOutput(d);
+  } catch (e) {
+    ccStatus.className = 'status-row error';
+    ccStatus.textContent = '检查失败：' + e.message;
+  }
+}
+
+async function runInstall(component) {
+  ccMsg.className = 'msg';
+  ccMsg.textContent = `正在执行 ${component || 'all'}…`;
+  try {
+    const r = await fetch('/install/run', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({component: component || 'all'}),
+    });
+    const d = await r.json();
+    ccOutput.style.display = 'block';
+    ccOutput.textContent = d.output || '(no output)';
+    if (d.ok) {
+      ccMsg.className = 'msg ok';
+      ccMsg.textContent = '✅ 完成。新打开的 Claude 窗口会生效；已开的需要重启那个窗口。';
+    } else {
+      ccMsg.className = 'msg err';
+      ccMsg.textContent = `安装器返回 rc=${d.rc}`;
+    }
+    // Re-fetch status after install
+    setTimeout(refreshClaudeCode, 200);
+  } catch (e) {
+    ccMsg.className = 'msg err';
+    ccMsg.textContent = '网络错误：' + e.message;
+  }
+}
+
+document.getElementById('cc-check').addEventListener('click', refreshClaudeCode);
+document.getElementById('cc-install-all'  ).addEventListener('click', () => runInstall('all'));
+document.getElementById('cc-install-mcp'  ).addEventListener('click', () => runInstall('mcp'));
+document.getElementById('cc-install-skill').addEventListener('click', () => runInstall('skill'));
+document.getElementById('cc-install-hook' ).addEventListener('click', () => runInstall('hook'));
 
 // ── System ──────────────────────────────────────────────────
 async function refreshSystem() {

@@ -18,42 +18,84 @@
   body { font-family: -apple-system, "Segoe UI", "PingFang SC", sans-serif;
          background: var(--bg); color: var(--text); margin: 0; line-height: 1.5; }
   nav.top { background: var(--panel); border-bottom: 1px solid var(--border);
-            padding: 12px 24px; display: flex; align-items: center; gap: 16px; }
-  nav.top .brand { font-weight: 600; font-size: 15px; }
-  nav.top .links { margin-left: auto; display: flex; gap: 4px; }
-  nav.top a { color: var(--muted); text-decoration: none; padding: 6px 12px;
-              border-radius: 6px; font-size: 13px; }
-  nav.top a:hover { background: var(--bg); color: var(--text); }
-  nav.top a.active { color: var(--primary); background: rgba(53, 118, 245, 0.08); }
-  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
-  header.page { margin-bottom: 24px; }
-  header.page h1 { font-size: 22px; margin: 0 0 4px; font-weight: 600; }
+            padding: 12px 24px; display: flex; align-items: center; gap: 16px;
+            position: sticky; top: 0; z-index: 10; }
+  nav.top .brand { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  nav.top .brand::before { content: ""; display: inline-block; width: 8px; height: 8px;
+                           border-radius: 50%; background: var(--primary); }
+  nav.top .links { margin-left: auto; display: flex; gap: 2px; }
+  nav.top a { color: var(--muted); text-decoration: none; padding: 8px 14px;
+              font-size: 13px; position: relative; transition: color 0.15s; }
+  nav.top a:hover { color: var(--text); }
+  nav.top a.active { color: var(--primary); font-weight: 500; }
+  nav.top a.active::after { content: ""; position: absolute; left: 14px; right: 14px;
+                            bottom: -13px; height: 2px; background: var(--primary);
+                            border-radius: 2px; }
+  main { max-width: 980px; margin: 0 auto; padding: 32px 20px 48px; }
+  header.page { margin-bottom: 28px; }
+  header.page h1 { font-size: 26px; margin: 0 0 6px; font-weight: 600; letter-spacing: -0.01em; }
   header.page p { color: var(--muted); margin: 0; font-size: 14px; }
 
-  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
-  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-          padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; }
+  .grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+          padding: 20px 22px; display: flex; flex-direction: column; gap: 12px;
+          position: relative; overflow: hidden; transition: border-color 0.15s, transform 0.15s; }
+  .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+                  width: 3px; background: var(--accent, var(--primary)); }
+  .card:hover { border-color: #cbd5e1; }
   .card h2 { font-size: 15px; margin: 0; font-weight: 600; display: flex;
              align-items: center; gap: 8px; }
+  .card h2 .icon { font-size: 18px; line-height: 1; }
   .card .body { font-size: 13px; color: var(--muted); line-height: 1.55; min-height: 36px; }
   .card .actions { margin-top: auto; display: flex; gap: 8px; flex-wrap: wrap; padding-top: 4px; }
+  #card-chat    { --accent: #3576f5; }
+  #card-weixin  { --accent: #10b981; }
+  #card-sessions{ --accent: #f59e0b; }
+
   .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px;
            background: #eef2f7; color: var(--muted); font-weight: 500; }
   .badge.on  { background: #dcfce7; color: #166534; }
   .badge.off { background: #fee2e2; color: #991b1b; }
   .badge.dim { background: #eef2f7; color: var(--muted); }
-  a.btn { display: inline-block; padding: 8px 16px; border-radius: 6px; font-size: 13px;
-          text-decoration: none; background: var(--primary); color: #fff; }
-  a.btn:hover { background: var(--primary-hover); }
-  a.btn.secondary { background: #eef2f7; color: var(--text); }
-  a.btn.secondary:hover { background: #e2e8f0; }
+  a.btn, button.btn { display: inline-block; padding: 8px 16px; border-radius: 6px;
+          font-size: 13px; text-decoration: none; background: var(--primary); color: #fff;
+          border: 0; cursor: pointer; font-family: inherit; transition: background 0.15s; }
+  a.btn:hover, button.btn:hover { background: var(--primary-hover); }
+  a.btn.secondary, button.btn.secondary { background: #eef2f7; color: var(--text); }
+  a.btn.secondary:hover, button.btn.secondary:hover { background: #e2e8f0; }
+  a.btn.ghost { background: transparent; color: var(--primary); padding: 8px 12px; }
+  a.btn.ghost:hover { background: rgba(53,118,245,0.08); }
   .kv { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted);
-        padding: 5px 0; border-top: 1px solid var(--border); }
+        padding: 6px 0; border-top: 1px solid var(--border); }
   .kv:first-of-type { border-top: 0; }
-  .kv b { color: var(--text); font-weight: 500; }
-  footer { margin-top: 32px; font-size: 12px; color: var(--muted); text-align: center; }
+  .kv b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+  footer { margin-top: 40px; font-size: 12px; color: var(--muted); text-align: center; }
   footer code { background: var(--panel); padding: 2px 6px; border-radius: 3px;
                 border: 1px solid var(--border); }
+
+  /* ── Modal ─────────────────────────────────────────────── */
+  .modal-mask { display: none; position: fixed; inset: 0;
+                background: rgba(15, 23, 42, 0.45); z-index: 99;
+                align-items: center; justify-content: center;
+                backdrop-filter: blur(2px); }
+  .modal-mask.show { display: flex; }
+  .modal-box { background: var(--panel); border-radius: 10px; padding: 24px 26px;
+               max-width: 440px; width: 90%; box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18);
+               border: 1px solid var(--border); }
+  .modal-box h2 { margin: 0 0 6px; font-size: 16px; font-weight: 600; }
+  .modal-box .hint { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+  .modal-box .field { margin-top: 10px; }
+  .modal-box label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+  .modal-box input { width: 100%; padding: 9px 11px; border: 1px solid var(--border);
+                     border-radius: 6px; font-size: 13px; font-family: monospace;
+                     box-sizing: border-box; transition: border-color 0.15s, box-shadow 0.15s; }
+  .modal-box input:focus { outline: 0; border-color: var(--primary);
+                           box-shadow: 0 0 0 3px rgba(53,118,245,0.12); }
+  .modal-box .row { display: flex; gap: 8px; margin-top: 14px; }
+  .modal-box .msg { font-size: 12px; margin-top: 12px; min-height: 18px; color: var(--muted); }
+  .modal-box .msg.err { color: #dc2626; }
+  .modal-box .msg.ok  { color: #16a34a; }
+  .modal-box .close-row { display: flex; justify-content: flex-end; margin-top: 10px; }
 </style>
 </head>
 <body>
@@ -74,7 +116,7 @@
   <div class="grid">
     <!-- 浏览器聊天 -->
     <div class="card" id="card-chat">
-      <h2>浏览器聊天 <span class="badge dim" id="chat-alias">--</span></h2>
+      <h2><span class="icon">💬</span>浏览器聊天 <span class="badge dim" id="chat-alias">--</span></h2>
       <div class="body">直接在网页里和 Claude 对话，会话可在多个 alias 间切换。</div>
       <div class="kv"><span>当前会话</span><b id="chat-current">--</b></div>
       <div class="kv"><span>在线 sessions</span><b id="chat-online">--</b></div>
@@ -86,7 +128,7 @@
 
     <!-- 微信桥接 -->
     <div class="card" id="card-weixin">
-      <h2>微信桥接 <span class="badge dim" id="wx-state">--</span></h2>
+      <h2><span class="icon">📱</span>微信桥接 <span class="badge dim" id="wx-state">--</span></h2>
       <div class="body" id="wx-desc">通过 iLink Bot 接入个人微信，对绑定微信号说话即可触达 Claude。</div>
       <div class="kv"><span>账号</span><b id="wx-account">--</b></div>
       <div class="kv"><span>长轮询</span><b id="wx-polling">--</b></div>
@@ -97,7 +139,7 @@
 
     <!-- Sessions -->
     <div class="card" id="card-sessions">
-      <h2>会话与项目</h2>
+      <h2><span class="icon">🗂️</span>会话与项目</h2>
       <div class="body">每个 alias 对应一个独立的 Claude 子进程与工作目录，可在聊天页 <code>/proj</code> 命令里切换。</div>
       <div class="kv"><span>已登记 sessions</span><b id="sess-total">--</b></div>
       <div class="kv"><span>workspace 根</span><b id="sess-roots">--</b></div>
@@ -113,33 +155,25 @@
 </main>
 
 <!-- new-session modal -->
-<div id="modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4);
-                       z-index:99; align-items:center; justify-content:center;">
-  <div style="background:#fff; border-radius:8px; padding:24px 28px; max-width:420px;
-              width:90%; box-shadow:0 4px 24px rgba(0,0,0,0.2);">
-    <h2 style="margin:0 0 12px; font-size:16px;">开始新会话</h2>
-    <div style="font-size:13px; color:#555; margin-bottom:16px;">
-      新会话会用 <code>&lt;项目名&gt;-&lt;MMDD-HHMM&gt;</code> 命名。
-    </div>
-    <div style="display:flex; flex-direction:column; gap:8px;">
-      <button type="button" id="m-chat" style="padding:10px 14px; border:1px solid #007aff;
-              background:#fff; color:#007aff; border-radius:6px; cursor:pointer; font-size:14px;">
-        纯聊天（cwd = 用户 home）
+<div id="modal" class="modal-mask">
+  <div class="modal-box">
+    <h2>开始新会话</h2>
+    <div class="hint">新会话会用 <code>&lt;项目名&gt;-&lt;MMDD-HHMM&gt;</code> 命名。</div>
+    <div class="row">
+      <button type="button" id="m-chat" class="btn secondary" style="flex:1">
+        💬 纯聊天 (cwd = home)
       </button>
-      <div>
-        <label style="font-size:13px; color:#666;">或：项目路径</label>
-        <input id="m-cwd" placeholder="D:/aiproject/agent-bridge" style="width:100%;
-               padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;
-               margin-top:4px; box-sizing:border-box;">
-        <button type="button" id="m-proj" style="margin-top:6px; padding:8px 14px;
-                background:#007aff; color:#fff; border:0; border-radius:6px; cursor:pointer;
-                font-size:14px;">进入项目</button>
-      </div>
     </div>
-    <div id="m-status" style="margin-top:12px; font-size:12px; color:#888; min-height:16px;"></div>
-    <div style="text-align:right; margin-top:8px;">
-      <button type="button" id="m-cancel" style="padding:6px 12px; background:#eee;
-              color:#555; border:0; border-radius:4px; cursor:pointer; font-size:13px;">取消</button>
+    <div class="field">
+      <label>或：项目路径</label>
+      <input id="m-cwd" placeholder="D:/aiproject/agent-bridge">
+    </div>
+    <div class="row">
+      <button type="button" id="m-proj" class="btn" style="flex:1">📂 进入项目</button>
+    </div>
+    <div id="m-status" class="msg"></div>
+    <div class="close-row">
+      <button type="button" id="m-cancel" class="btn ghost" style="padding:6px 12px;">取消</button>
     </div>
   </div>
 </div>
@@ -186,11 +220,11 @@ const mStatus = document.getElementById('m-status');
 const mCwd = document.getElementById('m-cwd');
 
 function openModal() {
-  modal.style.display = 'flex';
-  mStatus.textContent = '';
+  modal.classList.add('show');
+  mStatus.textContent = ''; mStatus.className = 'msg';
   mCwd.value = '';
 }
-function closeModal() { modal.style.display = 'none'; }
+function closeModal() { modal.classList.remove('show'); }
 
 document.getElementById('btn-new').addEventListener('click', (e) => {
   e.preventDefault();
@@ -199,7 +233,7 @@ document.getElementById('btn-new').addEventListener('click', (e) => {
 document.getElementById('m-cancel').addEventListener('click', closeModal);
 
 async function createSession(mode, project_cwd) {
-  mStatus.textContent = '正在拉起 daemon（最多 15s）…';
+  mStatus.textContent = '正在拉起 daemon（最多 15s）…'; mStatus.className = 'msg';
   try {
     const r = await fetch('/session/new', {
       method: 'POST',
@@ -208,13 +242,16 @@ async function createSession(mode, project_cwd) {
     });
     const d = await r.json();
     if (d.ok) {
+      mStatus.className = 'msg ok';
       mStatus.textContent = `✅ 已创建 ${d.alias}，跳转中…`;
       setTimeout(() => { window.location.href = '/chat'; }, 600);
     } else {
-      mStatus.textContent = `❌ 失败：${d.error || '未知'}` + (d.alias ? ` (alias=${d.alias})` : '');
+      mStatus.className = 'msg err';
+      mStatus.textContent = `失败：${d.error || '未知'}` + (d.alias ? ` (alias=${d.alias})` : '');
     }
   } catch (e) {
-    mStatus.textContent = `❌ 网络错误：${e.message}`;
+    mStatus.className = 'msg err';
+    mStatus.textContent = `网络错误：${e.message}`;
   }
 }
 
