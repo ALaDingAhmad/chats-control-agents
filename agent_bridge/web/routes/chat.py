@@ -45,6 +45,19 @@ async def dashboard(request):
     return HTMLResponse(_dashboard_html())
 
 
+async def new_session(request):
+    """POST /session/new {mode: 'chat'|'project', project_cwd?: str}
+    Dashboard "start new session" button hits this. Spawns a fresh daemon
+    with auto-generated alias and marks it current.
+    """
+    from ..spawn_helpers import spawn_new_session
+    body = await request.json()
+    mode = (body.get("mode") or "").strip()
+    project_cwd = (body.get("project_cwd") or "").strip() or None
+    result = await spawn_new_session(mode, project_cwd)
+    return JSONResponse(result)
+
+
 async def dashboard_status(request):
     """Aggregated state for the dashboard cards. Keeps the page to one
     request instead of fanning out to /sessions + /weixin/status + /config."""
@@ -96,6 +109,11 @@ async def send_message(request):
     # `//foo` is the passthrough escape — strip one slash so child agent sees /foo.
     text = cmd.strip_passthrough_prefix(text)
     alias = sx.get_current()
+    if not alias:
+        return JSONResponse({
+            "ok": False, "reason": "no_session",
+            "hint": "还没有活跃会话，请到 dashboard 创建一个，或用 /proj 选项目。",
+        })
     log.info("send to %s: %d chars", alias, len(text))
     # Revive daemon on demand if it died while idle.
     from ..spawn_helpers import ensure_daemon_alive

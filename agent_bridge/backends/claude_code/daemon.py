@@ -75,12 +75,15 @@ READY_TIMEOUT = 30
 POST_TRIGGER_SETTLE = 6
 
 def _parse_args() -> tuple[str, str | None]:
-    """CLI: python claude_daemon.py [<alias>] [<cwd>]
-    Both optional. Defaults: alias='default', cwd=claude-code-account-switch.
+    """CLI: python -m agent_bridge.backends.claude_code.daemon [<alias>] [<cwd>]
+
+    Both optional. If alias is omitted, one is generated from cwd as
+    `<basename>-<MMDD-HHMM>`. If both are omitted, cwd falls back to
+    claude-code-account-switch (the historical default spawn dir).
     """
     args = sys.argv[1:]
-    alias = "default"
-    cwd = None
+    alias: str | None = None
+    cwd: str | None = None
     # If first arg looks like an existing dir, treat all positional as cwd-only
     # (legacy: previously CLI accepted just a cwd path).
     if args and Path(args[0]).is_dir() and ("/" in args[0] or "\\" in args[0]):
@@ -92,6 +95,13 @@ def _parse_args() -> tuple[str, str | None]:
         alias = args[0]
         if len(args) >= 2 and Path(args[1]).is_dir():
             cwd = args[1]
+    if alias is None:
+        # Defer import: agent_bridge isn't on sys.path until daemon.py runs as -m
+        from agent_bridge.core.sessions import make_alias_for_cwd
+        from agent_bridge.core.paths import ROOT as _ROOT
+        # cwd for naming purposes: caller-given, else historical default
+        naming_cwd = cwd or str(_ROOT.parent / "claude-code-account-switch")
+        alias = make_alias_for_cwd(naming_cwd)
     return alias, cwd
 
 

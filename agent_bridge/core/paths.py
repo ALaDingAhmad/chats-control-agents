@@ -34,7 +34,10 @@ AUTOSPAWN_QUEUE_FILE = SESSIONS_ROOT / "_autospawn_queue.jsonl"
 # Alias = a-zA-Z0-9_-CJK 1-32 chars. Used as a directory name and command arg.
 ALIAS_RE = re.compile(r"^[a-zA-Z0-9_\-一-鿿]{1,32}$")
 
-DEFAULT_ALIAS = "default"
+# Legacy: pre-multi-session code wrote everything under chat_sessions/default/.
+# No new code creates this alias; kept only so the one-shot legacy migration
+# function still has a target and so existing default/ dirs remain readable.
+LEGACY_DEFAULT_ALIAS = "default"
 
 
 # ── Per-alias path helpers ────────────────────────────────────────────────

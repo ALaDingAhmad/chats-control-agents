@@ -15,10 +15,14 @@ from __future__ import annotations
 import json
 from typing import Optional
 
+from datetime import datetime
+from pathlib import Path
+import re as _re
+
 from .paths import (
     ALIAS_RE,
     CURRENT_FILE,
-    DEFAULT_ALIAS,
+    LEGACY_DEFAULT_ALIAS,
     SESSIONS_ROOT,
     history_path,
     inbox_path,
@@ -30,7 +34,13 @@ from .pid_track import _pid_alive
 
 
 # ── Current selection (global, single-user) ──────────────────────────────
-def get_current() -> str:
+def get_current() -> Optional[str]:
+    """Returns the currently selected alias, or None if nothing is selected.
+
+    No default fallback: post-migration, every session is named explicitly
+    (project name + time). The web layer prompts the user to create one if
+    no session exists yet.
+    """
     if CURRENT_FILE.exists():
         try:
             cur = CURRENT_FILE.read_text(encoding="utf-8").strip()
@@ -38,7 +48,36 @@ def get_current() -> str:
                 return cur
         except Exception:
             pass
-    return DEFAULT_ALIAS
+    return None
+
+
+# ── Alias generation: <project>-<MMDD-HHMM>, sanitized ───────────────────
+_ALIAS_BAD = _re.compile(r"[^a-zA-Z0-9_\-一-鿿]+")
+
+
+def _sanitize_alias_part(s: str) -> str:
+    """Replace any char not in ALIAS_RE with '-', collapse runs of '-'."""
+    cleaned = _ALIAS_BAD.sub("-", s).strip("-")
+    cleaned = _re.sub(r"-+", "-", cleaned)
+    return cleaned or "x"
+
+
+def make_alias_for_cwd(cwd: str | Path, when: datetime | None = None) -> str:
+    """Build an alias like 'agent-bridge-0605-1130' from a cwd.
+
+    - project name = basename(cwd)
+    - timestamp = MMDD-HHMM (default now)
+    - sanitized to fit ALIAS_RE, truncated to 32 chars (the regex hard limit).
+    """
+    when = when or datetime.now()
+    stem = _sanitize_alias_part(Path(cwd).name)
+    stamp = when.strftime("%m%d-%H%M")
+    full = f"{stem}-{stamp}"
+    if len(full) <= 32:
+        return full
+    # Need to trim the project part so timestamp survives.
+    keep = 32 - len(stamp) - 1
+    return f"{stem[:keep]}-{stamp}"
 
 
 def set_current(alias: str) -> None:
@@ -114,7 +153,7 @@ def migrate_legacy_if_present() -> None:
     """One-shot: if old chat_inbox.txt etc. exist at project root, move them
     into chat_sessions/default/. Safe to call on every startup."""
     from .paths import ROOT
-    sd = session_dir(DEFAULT_ALIAS)
+    sd = session_dir(LEGACY_DEFAULT_ALIAS)
     sd.mkdir(parents=True, exist_ok=True)
     moves = [
         ("chat_inbox.txt", "inbox.txt"),

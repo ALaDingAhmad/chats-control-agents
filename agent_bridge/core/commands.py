@@ -351,6 +351,8 @@ def _cmd_rename(new_alias: str) -> str:
     if not ALIAS_RE.match(new_alias):
         return f"非法 alias：{new_alias!r}"
     cur = get_current()
+    if not cur:
+        return "当前没有活跃会话，先 /proj 选一个项目或在 dashboard 新建。"
     if cur == new_alias:
         return f"当前会话已经叫 {new_alias!r}。"
     m = load_meta_for(cur) or {}

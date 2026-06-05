@@ -16,6 +16,8 @@ def now_iso() -> str:
 def load_history(alias: str | None = None) -> list:
     if alias is None:
         alias = sx.get_current()
+    if not alias:
+        return []
     p = history_path(alias)
     if not p.exists():
         return []
@@ -28,6 +30,8 @@ def load_history(alias: str | None = None) -> list:
 def save_history(items, alias: str | None = None) -> None:
     if alias is None:
         alias = sx.get_current()
+    if not alias:
+        return
     p = history_path(alias)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")

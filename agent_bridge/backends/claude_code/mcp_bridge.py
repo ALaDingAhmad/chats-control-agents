@@ -19,6 +19,7 @@ Log: ./mcp_bridge.log  (shared across sessions, prefixed by alias)
 import atexit
 import logging
 import os
+import sys
 import time
 from pathlib import Path
 from datetime import datetime
@@ -30,8 +31,23 @@ from mcp.server.fastmcp import FastMCP
 ROOT = Path(__file__).resolve().parents[3]
 LOG_PATH = ROOT / "mcp_bridge.log"
 
-# Alias is set by the daemon via env. Default keeps single-session legacy use working.
-ALIAS = (os.environ.get("WEB_RELAY_ALIAS") or "default").strip() or "default"
+# Alias resolution order:
+#   1. WEB_RELAY_ALIAS env (set by daemon when it spawns child claude)
+#   2. <basename(cwd)>-<MMDD-HHMM> (auto for user-opened claude windows so
+#      every window gets a unique alias, no more "default" collision)
+#   3. relay_init() MCP tool can override at runtime (used by the web-relay
+#      skill when the user wants an explicit alias).
+def _initial_alias() -> str:
+    env_val = (os.environ.get("WEB_RELAY_ALIAS") or "").strip()
+    if env_val:
+        return env_val
+    # Defer import so this file can be invoked stand-alone via python path
+    sys.path.insert(0, str(ROOT))
+    from agent_bridge.core.sessions import make_alias_for_cwd  # noqa: E402
+    return make_alias_for_cwd(os.getcwd())
+
+
+ALIAS = _initial_alias()
 SESSION_DIR = ROOT / "chat_sessions" / ALIAS
 SESSION_DIR.mkdir(parents=True, exist_ok=True)
 INBOX = SESSION_DIR / "inbox.txt"
@@ -44,10 +60,31 @@ MARKER = Path.home() / ".claude" / f".web-relay-active-{ALIAS}"
 logging.basicConfig(
     filename=str(LOG_PATH),
     level=logging.INFO,
-    format="%(asctime)s %(levelname)s [" + ALIAS + "] %(message)s",
+    format="%(asctime)s %(levelname)s %(message)s",
     encoding="utf-8",
 )
 log = logging.getLogger("bridge")
+
+
+def _retarget_alias(new_alias: str) -> None:
+    """relay_init swaps the active session at runtime. Updates all module-level
+    paths and rotates the marker file. Safe to call multiple times."""
+    global ALIAS, SESSION_DIR, INBOX, OUTBOX, MARKER
+    old_marker = MARKER
+    ALIAS = new_alias
+    SESSION_DIR = ROOT / "chat_sessions" / ALIAS
+    SESSION_DIR.mkdir(parents=True, exist_ok=True)
+    INBOX = SESSION_DIR / "inbox.txt"
+    OUTBOX = SESSION_DIR / "outbox.txt"
+    MARKER = Path.home() / ".claude" / f".web-relay-active-{ALIAS}"
+    try:
+        if old_marker.exists() and old_marker != MARKER:
+            old_marker.unlink()
+    except Exception as e:
+        log.warning("[%s] retarget: old marker unlink failed: %s", new_alias, e)
+    log.info("[%s] alias retargeted from previous", new_alias)
+
+
 
 mcp = FastMCP("web-chat")
 
@@ -63,6 +100,22 @@ BASE_WAIT_SECONDS = 300  # first timeout, doubles after each empty wait
 
 def _current_wait_seconds() -> int:
     return BASE_WAIT_SECONDS * (2 ** _consecutive_timeouts)
+
+
+@mcp.tool()
+def relay_init(alias: str) -> str:
+    """
+    Switch this MCP server's active alias. Call this before wait_for_message
+    when you want messages routed to a session other than the auto-derived
+    one (the web-relay skill uses this to set a `<project>-<MMDD-HHMM>` alias).
+
+    Alias must match a-zA-Z0-9_- or CJK characters, 1-32 chars.
+    """
+    import re as _re
+    if not _re.match(r"^[a-zA-Z0-9_\-一-鿿]{1,32}$", alias):
+        return f"ERROR: invalid alias {alias!r}. Must be a-zA-Z0-9_- or CJK, 1-32 chars."
+    _retarget_alias(alias)
+    return f"OK, alias is now {alias}. Inbox: {INBOX}"
 
 
 @mcp.tool()

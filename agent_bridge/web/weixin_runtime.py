@@ -211,6 +211,17 @@ async def _inbound_longpoll(account: dict):
                     # Regular message → route to currently selected session.
                     text = cmd.strip_passthrough_prefix(text)
                     alias = sx.get_current()
+                    if not alias:
+                        try:
+                            await wx.send_text(
+                                session, base_url=base_url, token=token,
+                                to_user_id=sender,
+                                text="⚠️ 还没有活跃会话，请到 dashboard 创建一个。",
+                                context_token=ctx_tok,
+                            )
+                        except Exception as e:
+                            log.warning("weixin no-session notify failed: %s", e)
+                        continue
                     _wx.setdefault("alias_peer", {})[alias] = sender
                     # Revive daemon on demand if it died while idle.
                     from .spawn_helpers import ensure_daemon_alive
