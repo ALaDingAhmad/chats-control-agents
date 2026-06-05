@@ -6,7 +6,7 @@ the AI: WeChat, browser, future Feishu / Slack / Telegram / email.
 ## Skeleton
 
 ```
-agent_bridge/channels/<name>/
+chats_control_agents/channels/<name>/
 ├── __init__.py
 ├── protocol.py    HTTP / WebSocket / SDK calls (whatever the IM uses)
 ├── state.py       persistent credentials, per-peer state (gitignored)

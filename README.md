@@ -21,7 +21,7 @@ python install/install.py
 #    Default ["D:/aiproject", "F:/wslshare"] — edit config.json if needed.
 
 # 4. Start the web server
-python -m agent_bridge.web.server
+python -m chats_control_agents.web.server
 # → http://127.0.0.1:8765/
 
 # 5. (Optional) Connect WeChat
@@ -29,7 +29,7 @@ python -m agent_bridge.web.server
 
 # 6. Spawn a Claude Code session for some project
 #    Either via the dashboard "开始新会话" button, /proj in chat, or manually:
-python -m agent_bridge.backends.claude_code.daemon [<alias>] [<cwd>]
+python -m chats_control_agents.backends.claude_code.daemon [<alias>] [<cwd>]
 # (alias auto-derives as <basename(cwd)>-<MMDD-HHMM> if omitted)
 ```
 
@@ -51,7 +51,7 @@ python -m agent_bridge.backends.claude_code.daemon [<alias>] [<cwd>]
 ## Layout
 
 ```
-agent_bridge/
+chats_control_agents/
 ├── core/         shared logic: sessions, commands, projects, paths
 ├── channels/     IM adapters (weixin; future feishu, slack, …)
 ├── backends/     AI adapters (claude_code; future openclaw, hermes, …)

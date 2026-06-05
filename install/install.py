@@ -4,8 +4,8 @@ Installer for agent-bridge artefacts that live OUTSIDE the repo
 
 Usage:
     python install/install.py            # install all components
-    python install/install.py --mcp      # register web-chat MCP server
-    python install/install.py --skill    # install web-relay skill
+    python install/install.py --mcp      # register cca-msg MCP server
+    python install/install.py --skill    # install chats-loop skill
     python install/install.py --hook     # install + register PreToolUse hook
     python install/install.py --dry-run  # show planned changes, write nothing
     python install/install.py --uninstall
@@ -31,7 +31,7 @@ from pathlib import Path
 # Source artefacts (this file lives at <repo>/install/install.py)
 INSTALL_DIR = Path(__file__).resolve().parent
 REPO_ROOT = INSTALL_DIR.parent
-MCP_BRIDGE_ABS_PATH = REPO_ROOT / "agent_bridge" / "backends" / "claude_code" / "mcp_bridge.py"
+MCP_BRIDGE_ABS_PATH = REPO_ROOT / "chats_control_agents" / "backends" / "claude_code" / "mcp_bridge.py"
 
 # Targets in user's home
 HOME = Path.home()
@@ -41,10 +41,10 @@ SKILLS_DIR = HOME / ".claude" / "skills"
 HOOKS_DIR = HOME / ".claude" / "hooks"
 
 # Identifiers used for idempotency
-MCP_SERVER_NAME = "web-chat"
-SKILL_NAME = "web-relay"
-HOOK_FILENAME = "web_relay_pretool_hook.py"
-HOOK_MATCHER = "mcp__web-chat__send_chat_response"
+MCP_SERVER_NAME = "cca-msg"
+SKILL_NAME = "chats-loop"
+HOOK_FILENAME = "chats_loop_pretool_hook.py"
+HOOK_MATCHER = "mcp__cca-msg__send_chat_response"
 
 # ── Logging-ish helpers ──────────────────────────────────────────────────
 def info(msg: str) -> None:
@@ -95,7 +95,7 @@ def _write_json(path: Path, data: dict, dry: bool) -> None:
 
 # ── Component: MCP registration ──────────────────────────────────────────
 def install_mcp(dry: bool) -> None:
-    section("MCP (web-chat in ~/.claude.json)")
+    section("MCP (cca-msg in ~/.claude.json)")
     if not MCP_BRIDGE_ABS_PATH.exists():
         raise SystemExit(f"ERROR: mcp_bridge.py not found at {MCP_BRIDGE_ABS_PATH}")
     desired = {
@@ -189,7 +189,7 @@ def uninstall_skill(dry: bool) -> None:
 
 # ── Component: hook script + settings.json registration ──────────────────
 def install_hook(dry: bool) -> None:
-    section("Hook (web_relay_pretool_hook.py + ~/.claude/settings.json)")
+    section("Hook (chats_loop_pretool_hook.py + ~/.claude/settings.json)")
     src = INSTALL_DIR / "hooks" / HOOK_FILENAME
     if not src.is_file():
         raise SystemExit(f"ERROR: source hook missing: {src}")
@@ -278,8 +278,8 @@ def uninstall_hook(dry: bool) -> None:
 # ── CLI ──────────────────────────────────────────────────────────────────
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--mcp",   action="store_true", help="register web-chat MCP server")
-    parser.add_argument("--skill", action="store_true", help="install web-relay skill")
+    parser.add_argument("--mcp",   action="store_true", help="register cca-msg MCP server")
+    parser.add_argument("--skill", action="store_true", help="install chats-loop skill")
     parser.add_argument("--hook",  action="store_true", help="install + register PreToolUse hook")
     parser.add_argument("--dry-run", action="store_true", help="show planned changes, write nothing")
     parser.add_argument("--uninstall", action="store_true", help="reverse the install")

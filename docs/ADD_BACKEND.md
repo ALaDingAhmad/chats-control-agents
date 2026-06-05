@@ -6,7 +6,7 @@ A backend is whatever turns a user message into a reply: Claude Code TUI
 ## Skeleton
 
 ```
-agent_bridge/backends/<name>/
+chats_control_agents/backends/<name>/
 ├── __init__.py
 ├── adapter.py     (optional) implement backends.base.Backend
 └── …              backend-specific files (daemon, RPC client, …)
@@ -73,10 +73,10 @@ Cons:
 
 `backends/claude_code/daemon.py` does:
 
-- Parse CLI: `python -m agent_bridge.backends.claude_code.daemon <alias> [<cwd>]`
+- Parse CLI: `python -m chats_control_agents.backends.claude_code.daemon <alias> [<cwd>]`
 - Spawn `claude.exe --dangerously-skip-permissions` in a `winpty` PTY
 - Wait for TUI ready (looks for prompt / box-drawing chars)
-- Auto-type `调用 web-relay skill 立即进入消息循环` to kick the skill
+- Auto-type `调用 chats-loop skill 立即进入消息循环` to kick the skill
 - Write `meta.json` and append to `spawned_pids.jsonl`
 - Drain loop with watchdog: if PTY shows `You've hit your limit` or
   `/rate-limit-options`, press 3+Enter to dismiss, post a user-facing
@@ -92,7 +92,7 @@ loads. Exposes two tools:
   passed through to the LLM as `TIMEOUT (waited Xs, next will be Ys)`.
 - `send_chat_response(reply)` — write `outbox_path(ALIAS)` and return.
 
-The `WEB_RELAY_ALIAS` env var tells mcp_bridge which session it serves;
+The `CHATS_LOOP_ALIAS` env var tells mcp_bridge which session it serves;
 daemon sets this when spawning the child claude.
 
 ## Backend ABC

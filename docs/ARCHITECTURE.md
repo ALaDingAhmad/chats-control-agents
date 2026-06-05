@@ -29,7 +29,7 @@ OpenClaw is just a new file under `channels/` or `backends/`.
                                 │
                       ┌─────────────────┐
                       │  claude_code    │  ◀── daemon spawns child claude.exe
-                      │   backend       │       with WEB_RELAY_ALIAS=<alias>
+                      │   backend       │       with CHATS_LOOP_ALIAS=<alias>
                       │ (process-typed) │       child loads mcp_bridge as MCP
                       └─────────────────┘       server, calls wait_for_message
 ```
@@ -37,7 +37,7 @@ OpenClaw is just a new file under `channels/` or `backends/`.
 ## Package layout
 
 ```
-agent_bridge/
+chats_control_agents/
 ├── core/                  cross-cutting: no IO concerns, no backend specifics
 │   ├── paths.py           ROOT, SESSIONS_ROOT, CONFIG_FILE, ALIAS_RE, path helpers
 │   ├── config.py          load/save_config, get_workspace_roots
@@ -110,7 +110,7 @@ When `/proj` picks an offline / not-yet-existing project,
 `core.autospawn.request_autospawn(alias, cwd)` appends to
 `chat_sessions/_autospawn_queue.jsonl`. The web server's
 `web.autospawn.autospawn_worker` background task drains it and spawns
-`python -m agent_bridge.backends.claude_code.daemon <alias> <cwd>`
+`python -m chats_control_agents.backends.claude_code.daemon <alias> <cwd>`
 detached (Windows: `CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW`).
 
 ## Channel ↔ backend ↔ command interactions

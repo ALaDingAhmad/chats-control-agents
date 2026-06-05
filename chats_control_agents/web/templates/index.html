@@ -195,7 +195,7 @@ async function fetchHistory() {
 
 async function send(text) {
   sendBtn.disabled = true;
-  statusEl.textContent = '已发送，等待 Claude 回复…（如果是第一条，先在 Claude Code 窗口说"启动 web-relay"）';
+  statusEl.textContent = '已发送，等待 Claude 回复…（如果是第一条，先在 Claude Code 窗口说"启动 chats-loop"）';
   await fetch('/send', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
