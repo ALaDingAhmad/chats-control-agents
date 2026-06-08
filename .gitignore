@@ -30,3 +30,6 @@ Thumbs.db
 # Sibling tool metadata (not part of this codebase)
 entities.json
 mempalace.yaml
+
+# Claude Code per-machine settings (CLAUDE.md is tracked; settings dir is not)
+.claude/
