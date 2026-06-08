@@ -23,7 +23,7 @@
 
 ## 已知坑（容易再踩）
 
-- **`_wx["alias_peer"]` 没持久化**。web_server 重启后内存字典清空，已发过消息的 peer 映射丢；restart 后第一次 outbox→weixin 推不出去（但下次 inbound 会重建）。该持久化到 `weixin_state/alias_peer.json`。
+- **`_wx["alias_peer"]` 持久化到 `weixin_state/alias_peer.json`**：inbound 收到消息时 `wxs.set_alias_peer(alias, sender)` 落盘，`start_runtime_tasks` 启动时 `load_alias_peer()` 回填进 `_wx`。web_server 重启后第一条 outbox→weixin 不再丢。如果想"忘掉"某 alias 的 peer 映射（比如换号），删 `weixin_state/alias_peer.json` 里对应 key 即可。
 - **`_outbox_seen` 也没持久化，但有 prime 兜底**：watcher 启动时会扫所有 alias 的 outbox.txt 内容预记入 `_outbox_seen`（不发出，只视为"已见"）。这阻止了"web /send 测试残留在 outbox → weixin 接入后被当新消息重放"。**不要去掉 prime 逻辑**——`weixin_runtime.py` `_outbox_watcher` 函数开头。
 - **outbox_watcher 失败重试策略**：send_text 失败时**不 mark seen**，下个 0.5s 循环会重试。临时网络/token 抖动会自愈，但永久错误会刷屏日志——这是有意的，让你看见而不是闷死。
 - **PC 微信换行被吞**：iLink 协议层把 `\n` 在 PC 客户端压成一行（手机正常），无解决方案。多行输出（如 `/list`、`/proj`）只在手机上排版正确，**测试 UX 必须用手机微信看**，不要拿 PC 微信判断"格式对不对"。

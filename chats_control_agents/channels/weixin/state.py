@@ -22,6 +22,7 @@ STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 ACCOUNT_FILE = STATE_DIR / "account.json"
 CONTEXT_TOKEN_FILE = STATE_DIR / "context_tokens.json"
+ALIAS_PEER_FILE = STATE_DIR / "alias_peer.json"
 
 _lock = threading.Lock()
 
@@ -77,3 +78,33 @@ def set_context_token(peer_id: str, token: str) -> None:
                 data = {}
         data[peer_id] = token
         _atomic_write(CONTEXT_TOKEN_FILE, data)
+
+
+# ── Alias → peer map (which WeChat user owns which session) ───────────────
+def load_alias_peer() -> Dict[str, str]:
+    """Return {alias: peer_id}. Empty dict if file missing or unreadable."""
+    if not ALIAS_PEER_FILE.exists():
+        return {}
+    try:
+        data = json.loads(ALIAS_PEER_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def set_alias_peer(alias: str, peer_id: str) -> None:
+    if not alias or not peer_id:
+        return
+    with _lock:
+        data: Dict[str, str] = {}
+        if ALIAS_PEER_FILE.exists():
+            try:
+                data = json.loads(ALIAS_PEER_FILE.read_text(encoding="utf-8"))
+                if not isinstance(data, dict):
+                    data = {}
+            except Exception:
+                data = {}
+        if data.get(alias) == peer_id:
+            return
+        data[alias] = peer_id
+        _atomic_write(ALIAS_PEER_FILE, data)

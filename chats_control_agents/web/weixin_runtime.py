@@ -75,6 +75,12 @@ def cancel_tasks_named(*names: str) -> None:
 def start_runtime_tasks(account: dict) -> None:
     """Spawn long-poll (inbound) and outbox-watcher (outbound) tasks."""
     cancel_tasks_named("longpoll", "outbox_watch")
+    # Restore alias→peer mapping so the first outbox-push after restart can
+    # reach the right WeChat user without waiting for them to write in again.
+    restored = wxs.load_alias_peer()
+    if restored:
+        _wx["alias_peer"] = dict(restored)
+        log.info("weixin: restored %d alias→peer mappings", len(restored))
     _wx["running"] = True
     t1 = asyncio.create_task(_inbound_longpoll(account), name="longpoll")
     t2 = asyncio.create_task(_outbox_watcher(account), name="outbox_watch")
@@ -239,6 +245,7 @@ async def _inbound_longpoll(account: dict):
                             log.warning("weixin no-session notify failed: %s", e)
                         continue
                     _wx.setdefault("alias_peer", {})[alias] = sender
+                    wxs.set_alias_peer(alias, sender)
                     # Revive daemon on demand if it died while idle.
                     from .spawn_helpers import ensure_daemon_alive
                     alive = await ensure_daemon_alive(alias)
