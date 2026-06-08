@@ -44,29 +44,22 @@ async def ensure_daemon_alive(alias: str) -> bool:
         log.warning("ensure[%s]: spawn failed", alias)
         return False
 
-    # Ready signal: daemon writes "skill activated" to daemon.log once the
-    # child claude has loaded chats-loop and is sitting in the message loop.
-    # meta.json gets the new pid earlier (right after spawning child claude),
-    # but child isn't actually ready to read inbox until skill activates —
-    # checking the log is more accurate than checking meta.
-    log_path = sx.session_dir(alias) / "daemon.log"
-    deadline = time.time() + _READY_TIMEOUT_SECS
-    baseline_size = log_path.stat().st_size if log_path.exists() else 0
-    while time.time() < deadline:
-        await asyncio.sleep(_POLL_INTERVAL_SECS)
-        if not log_path.exists():
-            continue
-        try:
-            with log_path.open("r", encoding="utf-8", errors="replace") as f:
-                f.seek(baseline_size)
-                fresh = f.read()
-        except Exception:
-            continue
-        if "skill activated" in fresh:
-            log.info("ensure[%s]: daemon ready (skill activated)", alias)
+    # Ready = daemon process is alive. We used to additionally wait for the
+    # skill-activated marker in daemon.log, but that's flaky — Claude can take
+    # 20-40s to do TUI startup → /chats-loop slash → env lookup → relay_init
+    # → first wait_for_message, and the harness sometimes never prints the
+    # exact marker string we looked for. Writing to inbox is safe even if
+    # skill is still initializing: mcp_bridge.py polls the inbox file at 0.5s
+    # cadence inside wait_for_message, so the message will be picked up the
+    # moment the loop starts. The user pays at most a 20-30s reply latency
+    # on cold-start, which is the correct trade vs. the previous behavior of
+    # silently dropping the message after 15s.
+    for _ in range(20):  # give the OS a moment to schedule the new daemon process
+        if _pid_alive(spawned_pid):
+            log.info("ensure[%s]: daemon pid=%s spawned and alive", alias, spawned_pid)
             return True
-
-    log.warning("ensure[%s]: timeout waiting for skill activation", alias)
+        await asyncio.sleep(0.1)
+    log.warning("ensure[%s]: spawned pid=%s never went live", alias, spawned_pid)
     return False
 
 

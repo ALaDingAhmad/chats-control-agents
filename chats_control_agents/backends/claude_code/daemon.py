@@ -53,12 +53,13 @@ CLAUDE_BIN = (
     / "bin"
     / "claude.exe"
 )
-# Command to auto-type once the TUI is ready. We name the skill explicitly
-# ("skill chats-loop") because the bare phrase "启动 chats-loop" sometimes makes
-# Claude treat chats-loop as a service name and try to investigate how to
-# start it, instead of invoking the skill. Using "skill" as the action verb
-# disambiguates and matches one of the skill's TRIGGER phrases verbatim.
-TRIGGER_COMMAND = "调用 chats-loop skill 立即进入消息循环"
+# Command to auto-type once the TUI is ready. We use the slash-command
+# form (/chats-loop) because that's a deterministic skill route in Claude
+# Code — the harness wires `/skill-name` directly to "invoke this skill",
+# bypassing the LLM's fuzzy intent classifier that tends to treat
+# imperative phrases like "启动 chats-loop" as "the user wants me to
+# create a chats-loop application", which is what kept happening before.
+TRIGGER_COMMAND = "/chats-loop"
 # Heuristics for "TUI is ready" — any of these substrings appearing in PTY
 # output after spawn means we can safely send the trigger.
 READY_MARKERS = [

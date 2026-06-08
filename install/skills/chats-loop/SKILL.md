@@ -29,6 +29,8 @@ When this skill is invoked, IMMEDIATELY enter the loop below. Do NOT first:
 - look for project-level config or README
 - ask the terminal user for clarification
 - list available MCP tools
+- investigate what `chats-loop` or `cca-msg` "is" — they are this skill and
+  its MCP server, nothing else; treat them as known fixed names
 
 The terminal user invoking this skill has already decided to start the
 relay. Your only job is to enter the loop and stay in it.
@@ -52,16 +54,19 @@ confused by the name collision.)
 
 ## Starting the loop
 
-1. **Compute the alias** for this relay session — never reuse a generic name
-   like "default". Format: `<project>-<MMDD-HHMM>`.
-   - `project` = basename of the current working directory, sanitized:
-     keep a-zA-Z0-9_- and CJK; replace any other char with `-`; collapse
-     runs of `-`. If empty after cleaning, use `chat`.
-   - `MMDD-HHMM` = current month-day and hour-minute, zero-padded.
-   - Truncate the final alias to 32 chars by shortening the project part
-     (the timestamp must survive).
-   - Examples: `agent-bridge-0605-1130`, `ALIENWARE-0605-0903`,
-     `项目-X-0605-1500`.
+1. **Resolve the alias** for this relay session, in this priority order:
+
+   a. **Env var `CHATS_LOOP_ALIAS`** — if set and non-empty, use it verbatim.
+      This is how the daemon tells you which alias to serve. Read it via a
+      Bash tool call: `echo "$CHATS_LOOP_ALIAS"`.
+   b. **Derive from cwd** — only if (a) returned empty. Format
+      `<project>-<MMDD-HHMM>`. project = basename(cwd), sanitized to
+      a-zA-Z0-9_- or CJK (replace anything else with `-`, collapse runs).
+      Timestamp = current month-day-hour-minute. Truncate to 32 chars by
+      shortening the project part.
+   c. Never reuse the generic name "default" outright (it's the legacy
+      single-session alias and only exists for back-compat reads).
+
 2. Call `mcp__cca-msg__relay_init` with that alias as the `alias` argument.
    If it returns a string starting with `ERROR`, fix the alias and retry once.
 3. Print exactly one terminal line: `chats-loop loop active alias=<alias>`

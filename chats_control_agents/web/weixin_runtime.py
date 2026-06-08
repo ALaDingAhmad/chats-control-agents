@@ -433,7 +433,7 @@ async def _outbox_watcher(account: dict):
                             log.info("weixin out[%s] to=%s chars=%d",
                                      alias, peer[:8], len(reply))
                     except Exception as e:
-                        log.warning("send_text failed: %s", e)
+                        log.warning("send_text failed: %s: %s", type(e).__name__, e or repr(e))
                     # Stop the typing bubble regardless of send result —
                     # leaving it on after a failed send would be misleading.
                     await _stop_typing(
