@@ -1,37 +1,6 @@
-"""Shared helpers for web routes: history I/O + timestamps."""
-from __future__ import annotations
+"""Back-compat shim: history I/O moved to core/history.py.
 
-import json
-from datetime import datetime
-from pathlib import Path
-
-from ..core import sessions as sx
-from ..core.paths import history_path
-
-
-def now_iso() -> str:
-    return datetime.now().isoformat(timespec="seconds")
-
-
-def load_history(alias: str | None = None) -> list:
-    if alias is None:
-        alias = sx.get_current()
-    if not alias:
-        return []
-    p = history_path(alias)
-    if not p.exists():
-        return []
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        return []
-
-
-def save_history(items, alias: str | None = None) -> None:
-    if alias is None:
-        alias = sx.get_current()
-    if not alias:
-        return
-    p = history_path(alias)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+Kept so older imports `from ..helpers import load_history, …` keep working.
+New code should import from chats_control_agents.core.history directly.
+"""
+from ..core.history import load_history, now_iso, save_history  # noqa: F401

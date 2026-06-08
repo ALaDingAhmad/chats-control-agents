@@ -10,14 +10,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
 
 from ..channels.weixin import protocol as wx
 from ..channels.weixin import state as wxs
-from ..core import commands as cmd
+from ..core import router
+from ..core.paths import outbox_path
 from ..core import sessions as sx
-from ..core.paths import inbox_path, outbox_path
-from .helpers import load_history, now_iso, save_history
 
 
 log = logging.getLogger("web.weixin")
@@ -214,69 +212,45 @@ async def _inbound_longpoll(account: dict):
                         wxs.set_context_token(sender, ctx_tok)
                     log.info("weixin inbound from=%s chars=%d", sender[:8], len(text))
 
-                    # Slash command → answer directly in-channel.
-                    if cmd.is_command(text):
-                        reply = cmd.handle_command(text)
+                    # Channel-agnostic routing. The router decides what to do
+                    # with the text (run a slash command, idle-gate to /proj,
+                    # write to inbox, …) and returns either a reply string for
+                    # us to deliver, or routed=True meaning the message hit
+                    # the backend and we should show the typing bubble.
+                    outcome = await router.route_inbound(
+                        text, source=f"weixin:{sender[:8]}",
+                    )
+
+                    # Track which peer "owns" each alias so the outbox watcher
+                    # knows who to send Claude's reply back to. This is a
+                    # channel concern, not routing — only persist when the
+                    # message actually went to the backend.
+                    if outcome.routed and outcome.alias:
+                        _wx.setdefault("alias_peer", {})[outcome.alias] = sender
+                        wxs.set_alias_peer(outcome.alias, sender)
+
+                    if outcome.reply is not None:
                         try:
-                            resp = await wx.send_text(
+                            r = await wx.send_text(
                                 session, base_url=base_url, token=token,
-                                to_user_id=sender, text=reply, context_token=ctx_tok,
+                                to_user_id=sender, text=outcome.reply,
+                                context_token=ctx_tok,
                             )
-                            ret = resp.get("ret")
+                            ret = r.get("ret")
                             if ret not in (0, None):
-                                log.warning("weixin command %r reply ret=%s errmsg=%s",
-                                            text[:30], ret, resp.get("errmsg"))
+                                log.warning("weixin reply ret=%s errmsg=%s",
+                                            ret, r.get("errmsg"))
                         except Exception as e:
-                            log.warning("weixin command reply failed: %s", e)
+                            log.warning("weixin reply failed: %s", e)
                         continue
 
-                    # Regular message → route to currently selected session.
-                    text = cmd.strip_passthrough_prefix(text)
-                    alias = sx.get_current()
-                    if not alias:
-                        try:
-                            await wx.send_text(
-                                session, base_url=base_url, token=token,
-                                to_user_id=sender,
-                                text="⚠️ 还没有活跃会话，请到 dashboard 创建一个。",
-                                context_token=ctx_tok,
-                            )
-                        except Exception as e:
-                            log.warning("weixin no-session notify failed: %s", e)
-                        continue
-                    _wx.setdefault("alias_peer", {})[alias] = sender
-                    wxs.set_alias_peer(alias, sender)
-                    # Revive daemon on demand if it died while idle.
-                    from .spawn_helpers import ensure_daemon_alive
-                    alive = await ensure_daemon_alive(alias)
-                    if not alive:
-                        try:
-                            await wx.send_text(
-                                session, base_url=base_url, token=token,
-                                to_user_id=sender,
-                                text="⚠️ agent 拉起失败，请稍后再试。",
-                                context_token=ctx_tok,
-                            )
-                        except Exception as e:
-                            log.warning("weixin notify spawn-fail failed: %s", e)
-                        continue
-                    inbox_path(alias).parent.mkdir(parents=True, exist_ok=True)
-                    try:
-                        inbox_path(alias).write_text(text, encoding="utf-8")
-                    except Exception as e:
-                        log.warning("inbox write failed: %s", e)
-                    history = load_history(alias)
-                    history.append({
-                        "role": "user", "text": text, "ts": now_iso(),
-                        "source": f"weixin:{sender[:8]}",
-                    })
-                    save_history(history, alias)
-                    # Show "对方正在输入..." while Claude composes. Keepalive
-                    # task auto-resends every 3s; outbox_watcher stops it.
-                    await _start_typing(
-                        session, base_url=base_url, token=token,
-                        peer=sender, ctx_tok=ctx_tok,
-                    )
+                    if outcome.routed:
+                        # Show "对方正在输入..." while Claude composes.
+                        # outbox_watcher stops it after the reply is sent.
+                        await _start_typing(
+                            session, base_url=base_url, token=token,
+                            peer=sender, ctx_tok=ctx_tok,
+                        )
     except asyncio.CancelledError:
         log.info("longpoll cancelled")
         raise

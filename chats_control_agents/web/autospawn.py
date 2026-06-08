@@ -14,57 +14,19 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
-import subprocess
 
 from ..core import sessions as sx
-from ..core.paths import AUTOSPAWN_QUEUE_FILE, ROOT
+from ..core.paths import AUTOSPAWN_QUEUE_FILE
 from ..core.pid_track import _pid_alive
+from ..core.spawn import spawn_daemon_detached
 
 
 log = logging.getLogger("web.autospawn")
 
 _autospawn_running: set[str] = set()  # aliases already spawned in this lifetime
 
-
-def _spawn_daemon_detached(alias: str, cwd: str) -> int | None:
-    """Spawn the daemon detached from web_server. Returns PID or None on failure.
-
-    Windows: DETACHED + CREATE_NEW_PROCESS_GROUP + CREATE_NO_WINDOW so the
-    daemon survives web_server restart and doesn't pop a console window.
-    Unix: start_new_session to detach from web_server's process group.
-    """
-    log_path = sx.session_dir(alias) / "daemon_stdout.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        f = open(log_path, "a", encoding="utf-8", errors="replace")
-    except Exception as e:
-        log.warning("autospawn[%s]: could not open log: %s", alias, e)
-        return None
-    kwargs: dict = {
-        "stdout": f,
-        "stderr": subprocess.STDOUT,
-        "stdin": subprocess.DEVNULL,
-        "cwd": str(ROOT),
-        "close_fds": True,
-    }
-    if os.name == "nt":
-        DETACHED = 0x00000008
-        CREATE_NEW_PROCESS_GROUP = 0x00000200
-        CREATE_NO_WINDOW = 0x08000000
-        kwargs["creationflags"] = DETACHED | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
-    else:
-        kwargs["start_new_session"] = True
-    try:
-        proc = subprocess.Popen(
-            ["python", "-m", "chats_control_agents.backends.claude_code.daemon", alias, cwd],
-            **kwargs,
-        )
-        log.info("autospawn[%s]: spawned pid=%s cwd=%s", alias, proc.pid, cwd)
-        return proc.pid
-    except Exception as e:
-        log.warning("autospawn[%s]: spawn failed: %s", alias, e)
-        return None
+# Back-compat alias for callers still importing the underscore-prefixed name.
+_spawn_daemon_detached = spawn_daemon_detached
 
 
 async def autospawn_worker():
@@ -108,7 +70,7 @@ async def autospawn_worker():
                     log.info("autospawn[%s]: daemon pid=%s already alive, skip", alias, daemon_pid)
                     _autospawn_running.add(alias)
                     continue
-                pid = _spawn_daemon_detached(alias, cwd)
+                pid = spawn_daemon_detached(alias, cwd)
                 if pid:
                     _autospawn_running.add(alias)
     except asyncio.CancelledError:
