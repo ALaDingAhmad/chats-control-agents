@@ -385,7 +385,29 @@ async def _outbox_watcher(account: dict):
     """
     token = account["bot_token"]
     base_url = account["baseurl"]
-    log.info("weixin outbox_watcher starting (multi-session)")
+    # Prime _outbox_seen with whatever is already on disk so we don't replay
+    # stale outbox.txt content on restart. _outbox_seen is in-memory only;
+    # without this, any leftover reply (e.g. from a browser /send test before
+    # WeChat was connected) would be forwarded as "new" the first time
+    # alias_peer gets populated. Use the same fingerprint format as the loop.
+    primed = 0
+    for sess in sx.list_sessions():
+        alias = sess["alias"]
+        p = outbox_path(alias)
+        if not p.exists():
+            continue
+        try:
+            content = p.read_text(encoding="utf-8").strip()
+        except Exception:
+            continue
+        if not content:
+            continue
+        lines = content.split("\n", 1)
+        stamp = lines[0] if content.startswith("[") else ""
+        reply = lines[1] if len(lines) > 1 else content
+        _outbox_seen[alias] = stamp + "|" + reply[:120]
+        primed += 1
+    log.info("weixin outbox_watcher starting (multi-session), primed=%d", primed)
     try:
         async with wx._build_session() as session:
             while _wx.get("running"):
@@ -420,6 +442,7 @@ async def _outbox_watcher(account: dict):
                         # so the new one will be forwarded normally.
                         continue
                     ctx_tok = wxs.get_context_token(peer)
+                    sent_ok = False
                     try:
                         resp = await wx.send_text(
                             session, base_url=base_url, token=token,
@@ -432,6 +455,7 @@ async def _outbox_watcher(account: dict):
                         else:
                             log.info("weixin out[%s] to=%s chars=%d",
                                      alias, peer[:8], len(reply))
+                            sent_ok = True
                     except Exception as e:
                         log.warning("send_text failed: %s: %s", type(e).__name__, e or repr(e))
                     # Stop the typing bubble regardless of send result —
@@ -439,7 +463,13 @@ async def _outbox_watcher(account: dict):
                     await _stop_typing(
                         session, base_url=base_url, token=token, peer=peer,
                     )
-                    _outbox_seen[alias] = fp
+                    # Only mark seen on successful delivery. On failure (network
+                    # blip, token expired, iLink ret!=0) leave fp un-memoed so
+                    # the next loop iteration retries. Permanent errors will
+                    # then loop noisily — that's by design; check the log
+                    # rather than silently losing the message.
+                    if sent_ok:
+                        _outbox_seen[alias] = fp
     except asyncio.CancelledError:
         log.info("outbox_watcher cancelled")
         raise
