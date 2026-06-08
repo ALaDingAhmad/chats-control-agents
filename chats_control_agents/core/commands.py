@@ -204,6 +204,7 @@ def _cmd_proj(args: list[str]) -> str:
     if page < pages:
         lines.append(f"回复 /proj more 看下一页（剩 {total - end} 个）")
     lines.append("回复编号切换；未运行的项目会自动启动 daemon。")
+    lines.append("回复 0 开空会话（cwd=用户主目录，不绑任何项目）。")
 
     write_proj_choices({
         "projects": projects,
@@ -214,11 +215,41 @@ def _cmd_proj(args: list[str]) -> str:
 
 
 def _cmd_pick_proj(n: int) -> str:
-    """Pick project #n from the most recent /proj listing."""
+    """Pick project #n from the most recent /proj listing.
+
+    n == 0 is a special-case "blank session": cwd defaults to the user's
+    home directory, no project association. Useful when the user is past
+    the idle gate but doesn't want any of the listed projects.
+    """
     choices = read_proj_choices() or {}
     projects: list[dict] = choices.get("projects") or []
     if not projects:
         return "没有可选项目。先发 /proj 看列表。"
+
+    if n == 0:
+        from .sessions import make_alias_for_cwd
+        home_cwd = str(Path.home())
+        alias = make_alias_for_cwd(home_cwd)
+        sd = session_dir(alias)
+        sd.mkdir(parents=True, exist_ok=True)
+        save_meta_for(alias, {
+            "alias": alias,
+            "cwd": home_cwd,
+            "daemon_pid": None,
+            "child_pid": None,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        })
+        try:
+            set_current(alias)
+        except Exception:
+            pass
+        request_autospawn(alias, home_cwd)
+        write_proj_choices(None)
+        return (
+            f"已开空会话 {alias}（cwd={home_cwd}），"
+            f"正在自动启动 daemon（约 10 秒就绪）。"
+        )
+
     if n < 1 or n > len(projects):
         return f"编号 {n} 越界（共 {len(projects)} 个）。再发 /proj 看列表。"
     p = projects[n - 1]
