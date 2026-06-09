@@ -1,129 +1,135 @@
-# agent-bridge architecture
+# agent-bridge 架构
 
-A pluggable bridge between **IM channels** (where humans type) and **AI
-execution backends** (what answers). Originally built to expose a local
-Claude Code TUI to a phone via WeChat; now generalized so adding Feishu or
-OpenClaw is just a new file under `channels/` or `backends/`.
+把"IM 渠道"（人在打字的地方）和"AI 执行后端"（在回话的东西）解耦的桥。
+最初是把本地 Claude Code TUI 通过微信暴露给手机；现在抽象成插件化——
+加飞书或 OpenClaw 就是 `channels/` 或 `backends/` 下加一个文件。
 
-## Data flow
+## 数据流
 
 ```
-┌─────────┐  inbound text   ┌──────────┐   /send + sx.is_command?  ┌──────────┐
-│ WeChat  │ ───────────────▶│          │ ──────────────────────────▶│ commands │  ──▶ reply
-│ Browser │                 │   web    │                            │   (/list,│
-│ Feishu? │ ◀───────────────│  routes  │ ◀──────────────────────────│   /proj) │
-└─────────┘  outbound reply └──────────┘   reply text               └──────────┘
-                                │
-                                │ regular message → write inbox.txt
-                                ▼
-                      ┌─────────────────┐
-                      │ chat_sessions/  │
-                      │   <alias>/      │
-                      │     inbox.txt   │ ◀── polled by mcp_bridge
-                      │     outbox.txt  │ ──▶ polled by web /poll + outbox_watcher
-                      │     history.json│
-                      │     meta.json   │
-                      └─────────────────┘
-                                ▲
-                                │ inbox poll / outbox write
-                                │
-                      ┌─────────────────┐
-                      │  claude_code    │  ◀── daemon spawns child claude.exe
-                      │   backend       │       with CHATS_LOOP_ALIAS=<alias>
-                      │ (process-typed) │       child loads mcp_bridge as MCP
-                      └─────────────────┘       server, calls wait_for_message
+┌─────────┐  入站文本       ┌──────────┐    route_inbound(text, src)   ┌─────────────┐
+│ 微信     │ ───────────────▶│ channels │ ─────────────────────────────▶│ core.router │
+│ 浏览器   │                 │ （只 I/O │                                │ • slash 命令│
+│ 飞书?   │ ◀────────────── │  不路由）│ ◀───────────────────────────── │ • idle gate │
+└─────────┘  回复 / typing   │          │   RouteOutcome(reply|routed)   │ • 拉 daemon │
+                            └──────────┘                                │ • 写 inbox  │
+                                                                        └──────┬──────┘
+                                                                               │
+                                                                               ▼
+                                                                     ┌─────────────────┐
+                                                                     │ chat_sessions/  │
+                                                                     │   <alias>/      │
+                                                                     │     inbox.txt   │ ◀── mcp_bridge 轮询
+                                                                     │     outbox.txt  │ ──▶ web /poll + outbox_watcher 轮询
+                                                                     │     history.json│
+                                                                     │     meta.json   │
+                                                                     └─────────────────┘
+                                                                               ▲
+                                                                               │ inbox 轮询 / outbox 写
+                                                                               │
+                                                                     ┌─────────────────┐
+                                                                     │  claude_code    │  ◀── daemon spawn child claude.exe
+                                                                     │   后端          │       带 CHATS_LOOP_ALIAS=<alias>
+                                                                     │ （进程型）      │       child 加载 mcp_bridge 作 MCP
+                                                                     └─────────────────┘       服务器，调 wait_for_message
 ```
 
-## Package layout
+## 包结构
 
 ```
 chats_control_agents/
-├── core/                  cross-cutting: no IO concerns, no backend specifics
-│   ├── paths.py           ROOT, SESSIONS_ROOT, CONFIG_FILE, ALIAS_RE, path helpers
-│   ├── config.py          load/save_config, get_workspace_roots
-│   ├── sessions.py        get/set_current, list_sessions, load/save_meta_for,
-│   │                      migrate_legacy_if_present
-│   ├── projects.py        list_projects (workspace scan + alias cross-ref)
-│   ├── proj_choices.py    persistent /proj selection state
-│   ├── autospawn.py       request_autospawn (writes to queue)
-│   ├── pid_track.py       _pid_alive (cross-platform), daemon child tracking
-│   └── commands.py        is_command, handle_command, all _cmd_*
+├── core/                  跨切面：不碰 IO 协议，不感知后端细节
+│   ├── paths.py           ROOT、SESSIONS_ROOT、CONFIG_FILE、ALIAS_RE、路径助手
+│   ├── config.py          load/save_config、get_workspace_roots
+│   ├── sessions.py        get/set_current、list_sessions、load/save_meta_for、
+│   │                      _last_active、migrate_legacy_if_present
+│   ├── projects.py        list_projects（扫工作空间 + 与 alias 交叉引用）
+│   ├── proj_choices.py    /proj 选号状态持久化
+│   ├── autospawn.py       request_autospawn（写队列）
+│   ├── pid_track.py       _pid_alive（跨平台）、daemon 子进程跟踪
+│   ├── commands.py        is_command、handle_command、所有 _cmd_*
+│   ├── history.py         load/save_history、now_iso（chat_sessions/*/history.json）
+│   ├── spawn.py           spawn_daemon_detached、ensure_daemon_alive（OS 层）
+│   └── router.py          route_inbound(text, source) → RouteOutcome
+│                          （含 2h idle gate；详见 docs/ROUTING.md）
 │
-├── channels/              "user-facing end"
-│   ├── base.py            Channel ABC + InboundMessage envelope
+├── channels/              "用户侧" —— 只做协议 I/O，不做路由决策
+│   ├── base.py            Channel 抽象类 + InboundMessage 信封
 │   └── weixin/            iLink Bot
-│       ├── protocol.py    HTTP API (QR login, longpoll, send_text)
-│       └── state.py       token + per-peer context_token persistence
+│       ├── protocol.py    HTTP API（QR 登录、longpoll、send_text）
+│       └── state.py       账号 + per-peer context_token + alias_peer 持久化
 │
-├── backends/              "AI execution end"
-│   ├── base.py            Backend ABC
-│   └── claude_code/       spawns child claude per session
-│       ├── daemon.py      PtyProcess spawn + watchdog (rate-limit dismiss)
-│       └── mcp_bridge.py  MCP server: wait_for_message + send_chat_response
+├── backends/              "AI 执行侧"
+│   ├── base.py            Backend 抽象类
+│   └── claude_code/       每个会话 spawn 一个 child claude
+│       ├── daemon.py      PtyProcess spawn + 看门狗（详见 docs/DAEMON-LIFECYCLE.md）
+│       └── mcp_bridge.py  MCP 服务器：wait_for_message + send_chat_response
 │
-└── web/                   Starlette HTTP layer
-    ├── server.py          app assembly + lifespan
-    ├── helpers.py         load/save_history
-    ├── weixin_runtime.py  _wx state, QR loop, longpoll, outbox watcher
-    ├── autospawn.py       autospawn_worker
+└── web/                   Starlette HTTP 层
+    ├── server.py          app 装配 + lifespan
+    ├── helpers.py         转发 shim，re-export core.history（向后兼容）
+    ├── spawn_helpers.py   core.spawn 的 shim + dashboard 的 spawn_new_session
+    ├── weixin_runtime.py  _wx 状态、QR 循环、longpoll、outbox watcher（不路由）
+    ├── autospawn.py       autospawn_worker（drain 队列，spawn 委托给 core）
     ├── routes/
     │   ├── chat.py        / /history /send /poll /relay-push
     │   ├── sessions.py    /sessions
     │   ├── projects.py    /projects /config /config/workspace
-    │   └── weixin.py      /weixin/* (status, qr/start, disconnect)
+    │   └── weixin.py      /weixin/*（status、qr/start、disconnect）
     └── templates/
         ├── index.html
         └── weixin.html
 ```
 
-## Session model
+## 会话模型
 
-A *session* is `chat_sessions/<alias>/`. Files inside:
+一个 *session* 是 `chat_sessions/<alias>/` 目录。内含文件：
 
-| file | who writes | who reads |
-|------|-----------|-----------|
-| `inbox.txt`          | channel inbound paths (web /send, weixin longpoll) | backend's mcp_bridge `wait_for_message` |
-| `outbox.txt`         | backend's mcp_bridge `send_chat_response`           | web /poll + weixin outbox watcher    |
-| `history.json`       | web routes (append on each turn)                    | UI                                   |
-| `meta.json`          | daemon (start/exit) + commands (`/new`)             | sessions.list_sessions, projects.py |
-| `spawned_pids.jsonl` | daemon (append per spawn)                           | pid_track.list_daemon_child_pids    |
-| `daemon.log` `pty.log` `daemon_stdout.log` | daemon                          | humans                               |
+| 文件 | 谁写 | 谁读 |
+|------|-----|-----|
+| `inbox.txt`          | 渠道入站路径（web /send、weixin longpoll）通过 router | 后端的 mcp_bridge `wait_for_message` |
+| `outbox.txt`         | 后端的 mcp_bridge `send_chat_response`              | web /poll + weixin outbox watcher    |
+| `history.json`       | router/web routes（每轮追加）                       | UI                                   |
+| `meta.json`          | daemon（start/exit）+ 命令（`/new`）                | sessions.list_sessions、projects.py |
+| `spawned_pids.jsonl` | daemon（每次 spawn 追加）                           | pid_track.list_daemon_child_pids    |
+| `daemon.log` `pty.log` `daemon_stdout.log` | daemon                          | 人看                                 |
 
-## Currently-selected alias
+## 当前选中 alias
 
-`chat_sessions/_current.txt` holds a single alias. All channel-inbound
-regular messages route to *this* alias's inbox. Slash commands like
-`/use <alias>` change it. Single global selection — works because
-agent-bridge is currently single-user; multi-user routing would need to
-key on `peer_id` instead.
+`chat_sessions/_current.txt` 存一个 alias。所有渠道入站的普通消息都路由
+到**这个** alias 的 inbox。slash 命令如 `/use <alias>` 改它。单一全局选中
+—— agent-bridge 当前是单用户场景，多用户路由要按 `peer_id` 分流，暂未实现。
 
-## /proj numeric pick flow
+## /proj 数字选择流程
 
-After `/proj` outputs a numbered listing, the user can reply with a bare
-integer to select. State (the list and an expiration) is persisted to
-`chat_sessions/_pending_proj.json` so it survives web_server restarts —
-the user's `/proj` may have come from a previous process lifetime.
+`/proj` 输出编号列表后，用户回纯整数即可选中。状态（列表 + 过期时间）
+持久化到 `chat_sessions/_pending_proj.json`，扛 web_server 重启 —— 用户的
+`/proj` 可能来自上一个进程生命周期。
+
+特殊值：`0` 表示开空会话（cwd=用户主目录、不绑项目），见 `commands._cmd_pick_proj`。
 
 ## Autospawn
 
-When `/proj` picks an offline / not-yet-existing project,
-`core.autospawn.request_autospawn(alias, cwd)` appends to
-`chat_sessions/_autospawn_queue.jsonl`. The web server's
-`web.autospawn.autospawn_worker` background task drains it and spawns
+`/proj` 选中离线 / 不存在的项目时，`core.autospawn.request_autospawn(alias, cwd)`
+追加到 `chat_sessions/_autospawn_queue.jsonl`。web_server 的
+`web.autospawn.autospawn_worker` 后台任务 drain 队列，detached 方式 spawn
 `python -m chats_control_agents.backends.claude_code.daemon <alias> <cwd>`
-detached (Windows: `CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW`).
+（Windows: `CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW`）。
 
-## Channel ↔ backend ↔ command interactions
+## 渠道 ↔ router ↔ 后端 交互
 
-- **Slash command** (`/proj`, `/list`, …): `cmd.is_command(text)` returns
-  True; the channel handler invokes `cmd.handle_command(text)` and replies
-  directly. Never touches the backend.
-- **Passthrough** (`//handoff`, `//recall`): `is_command` returns False;
-  `strip_passthrough_prefix` drops one slash so the agent sees `/handoff`.
-- **Regular message**: written to `inbox.txt` of `sx.get_current()`. The
-  backend's adapter (e.g. claude_code's mcp_bridge inside child claude)
-  picks it up.
+渠道调 `core.router.route_inbound(text, source)`，按返回的 `RouteOutcome`
+分流 —— 渠道**永远不直接调** `commands` / `sessions` / `spawn`。router 负责
+slash 命令、passthrough、2h idle gate、no-session 兜底、死 daemon 复活、写
+inbox / history。完整契约：[`docs/ROUTING.md`](ROUTING.md)。
 
-## Adding a channel / backend
+## claude_code daemon 生命周期
 
-See `docs/ADD_CHANNEL.md` and `docs/ADD_BACKEND.md` for step-by-step.
+child claude 怎么拉起（trust-folder 对话框、ready 标记、trigger、drain
+循环）、rate-limit 看门狗、怎么加新弹窗处理器（工具授权、操作确认）——
+详见 [`docs/DAEMON-LIFECYCLE.md`](DAEMON-LIFECYCLE.md)。
+
+## 加渠道 / 加后端
+
+详见 [`docs/ADD_CHANNEL.md`](ADD_CHANNEL.md) 和
+[`docs/ADD_BACKEND.md`](ADD_BACKEND.md)。

@@ -1,59 +1,56 @@
-# Installer for the artefacts that live outside the repo
+# 仓库外那些零件的安装器
 
-agent-bridge has three pieces that need to be visible to Claude Code globally
-(in your home dir), not just to the project:
+agent-bridge 有三个零件需要 Claude Code 全局可见（在你的家目录里），不能只
+留在项目里：
 
-| Component | Lives at | What it does |
+| 组件 | 放在哪 | 干啥的 |
 |---|---|---|
-| **MCP server `cca-msg`** | `~/.claude.json → mcpServers.cca-msg` | Registers `mcp_bridge.py` so every Claude window exposes the `wait_for_message` / `send_chat_response` / `relay_init` tools |
-| **Skill `chats-loop`** | `~/.claude/skills/chats-loop/` | Tells Claude how to enter the relay loop when you say "start chats-loop" |
-| **PreToolUse hook** | `~/.claude/hooks/chats_loop_pretool_hook.py` + a matcher entry in `~/.claude/settings.json` | Mirrors Claude's narration text to the browser before each `send_chat_response` |
+| **MCP 服务器 `cca-msg`** | `~/.claude.json → mcpServers.cca-msg` | 注册 `mcp_bridge.py`，让每个 Claude 窗口都能用 `wait_for_message` / `send_chat_response` / `relay_init` 工具 |
+| **Skill `chats-loop`** | `~/.claude/skills/chats-loop/` | 告诉 Claude 听到"start chats-loop"时怎么进入中继循环 |
+| **PreToolUse hook** | `~/.claude/hooks/chats_loop_pretool_hook.py` + `~/.claude/settings.json` 里的匹配项 | 在每次 `send_chat_response` 之前把 Claude 的旁白文本镜像到浏览器 |
 
-This installer copies them in, with backups, and is idempotent.
+这个安装器会拷进去（带备份），幂等可重跑。
 
-## Quick start
+## 快速开始
 
 ```bash
-# install all three components
+# 装三个组件
 python install/install.py
 
-# preview without writing anything
+# 干跑预览，不真写
 python install/install.py --dry-run
 
-# only one component
+# 只装一个
 python install/install.py --mcp
 python install/install.py --skill
 python install/install.py --hook
 
-# reverse it
+# 反装
 python install/install.py --uninstall
 ```
 
-## What it touches
+## 会改动哪些文件
 
-- `~/.claude.json` — adds/updates the `mcpServers.cca-msg` entry. **Backup
-  taken first** as `~/.claude.json.bak-<timestamp>`. All other MCP servers
-  and top-level fields are preserved (merge, not overwrite).
-- `~/.claude/settings.json` — adds a `PreToolUse` entry matched on
-  `mcp__cca-msg__send_chat_response`. Backup taken first.
-- `~/.claude/skills/chats-loop/` — copies `SKILL.md`. If a different version
-  is already there it's moved to `chats-loop.bak-<timestamp>/`.
-- `~/.claude/hooks/chats_loop_pretool_hook.py` — copies the script. Same
-  backup rule.
+- `~/.claude.json` —— 加/更新 `mcpServers.cca-msg` 项。**先备份**为
+  `~/.claude.json.bak-<时间戳>`。其它 MCP 服务器和顶层字段都保留（合并，
+  不是覆盖）。
+- `~/.claude/settings.json` —— 加 `PreToolUse` 项，匹配
+  `mcp__cca-msg__send_chat_response`。先备份。
+- `~/.claude/skills/chats-loop/` —— 拷 `SKILL.md`。已有不同版本会移到
+  `chats-loop.bak-<时间戳>/`。
+- `~/.claude/hooks/chats_loop_pretool_hook.py` —— 拷脚本。同样的备份规则。
 
-## After installing
+## 装完之后
 
-Anything that's *already running* needs a restart to pick up changes:
+**正在跑的东西**要重启才能加载新东西：
 
-- **Claude windows**: each one loads `~/.claude.json` once at startup, so
-  the new MCP path takes effect only after restarting that window.
-- **web_server** (`python -m chats_control_agents.web.server`): the dashboard and
-  `/session/new` route are part of the repo, not the installer, but the
-  running web_server has to be restarted separately to pick up code
-  changes from the repo.
+- **Claude 窗口**：每个窗口启动时只读一次 `~/.claude.json`，新 MCP 路径要
+  重启该窗口才生效。
+- **web_server**（`python -m chats_control_agents.web.server`）：dashboard 和
+  `/session/new` 路由是仓库的事不是安装器的事，但正在跑的 web_server 仍要
+  单独重启才能加载仓库里的代码改动。
 
-## Path portability
+## 路径可移植性
 
-`install.py` derives `mcp_bridge.py`'s absolute path from its own location
-(`<repo>/install/install.py`), so cloning the repo to a different drive and
-running the installer works without editing anything.
+`install.py` 从自身位置（`<repo>/install/install.py`）算出 `mcp_bridge.py`
+的绝对路径，所以把仓库 clone 到另一个盘上跑安装器无需改任何东西。
