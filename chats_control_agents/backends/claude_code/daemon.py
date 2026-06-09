@@ -62,13 +62,18 @@ CLAUDE_BIN = (
 TRIGGER_COMMAND = "/chats-loop"
 # Heuristics for "TUI is ready" — any of these substrings appearing in PTY
 # output after spawn means we can safely send the trigger.
+#
+# CRITICAL: every marker here must appear ONLY on the post-init main screen,
+# never during pre-init dialogs (e.g. "Do you trust this folder?", login
+# prompts). The previous list included generic box-drawing/prompt chars
+# (│ > ❯) that fired on the trust dialog, so the trigger was typed into
+# that dialog instead of the chat input — \r selected option 1 ("yes")
+# and the slash command was silently discarded, leaving chats-loop never
+# activated and inbox messages never picked up.
 READY_MARKERS = [
-    "Welcome",          # Welcome back, Welcome to Claude Code
-    "Tips for getting", # Tips for getting started
-    "What's new",       # changelog block
-    "│",                # box-drawing characters used heavily by ink TUI
-    ">",                # prompt
-    "❯",                # alternate prompt char some shells use
+    "Welcome back",     # only shown on the main chat screen
+    "Tips for getting", # "Tips for getting started" panel of the welcome card
+    "What's new",       # changelog block on the welcome card
 ]
 # Max seconds to wait for TUI ready before bailing
 READY_TIMEOUT = 30
