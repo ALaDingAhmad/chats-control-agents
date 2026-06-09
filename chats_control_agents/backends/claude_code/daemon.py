@@ -261,10 +261,17 @@ def main() -> int:
     signal.signal(signal.SIGINT, _sigint)
 
     # Phase 1: wait for TUI to be "ready"
+    #
+    # First-launch in a fresh cwd blocks on the "Do you trust this folder?"
+    # dialog (default-selected = "1. Yes"). Detect it and press Enter so the
+    # TUI proceeds to the main welcome screen where READY_MARKERS will fire.
+    # Without this, the daemon read() blocks forever on an unanswered dialog
+    # and the 30s timeout never even gets checked.
     print("[daemon] waiting for TUI to load...")
     buffer = ""
     start = time.time()
     ready = False
+    trust_dismissed = False
     while time.time() - start < READY_TIMEOUT:
         try:
             chunk = proc.read(1024)
@@ -282,6 +289,18 @@ def main() -> int:
         pty_log.write(text)
         pty_log.flush()
         buffer += text
+        # Trust-folder dialog detection — answer once, then keep reading.
+        if not trust_dismissed and "trust this folder" in buffer:
+            try:
+                proc.write("\r")  # default selection is "1. Yes"
+                trust_dismissed = True
+                log.info("trust-folder dialog: pressed Enter (accept default)")
+                # Reset the buffer so the marker scan doesn't re-fire later
+                # text fragments that happen to contain partial markers.
+                buffer = ""
+            except Exception as e:
+                log.warning("trust-folder accept failed: %s", e)
+            continue
         # Look for any ready marker
         if any(marker in buffer for marker in READY_MARKERS):
             ready = True
