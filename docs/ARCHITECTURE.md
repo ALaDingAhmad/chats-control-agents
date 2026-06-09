@@ -123,6 +123,12 @@ chats_control_agents/
 slash 命令、passthrough、2h idle gate、no-session 兜底、死 daemon 复活、写
 inbox / history。完整契约：[`docs/ROUTING.md`](ROUTING.md)。
 
+bridge 主动拉起 daemon 之后（router 的 ensure_daemon_alive 或 autospawn
+worker），会启动 `spawn.watch_ready(alias)` 后台任务监听
+`~/.claude/.chats-loop-active-<alias>` marker，就绪/失败时写 outbox 通知
+用户——所有渠道通过现有 outbox_watcher 自动收到。完整契约见
+[`docs/ROUTING.md`](ROUTING.md) "就绪通知"节。
+
 ## claude_code daemon 生命周期
 
 child claude 怎么拉起（trust-folder 对话框、ready 标记、trigger、drain

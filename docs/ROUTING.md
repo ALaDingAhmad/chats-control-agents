@@ -58,10 +58,64 @@ class RouteOutcome:
    `core.router.IDLE_THRESHOLD_SECS`（目前 2 小时）。
 
 5. **daemon 死了就拉起** — 调 `spawn.ensure_daemon_alive(alias)`。返 False
-   就把"agent 拉起失败"作为 reply 抛回去。
+   就把"agent 拉起失败"作为 reply 抛回去。spawn 成功的话，**会顺带启动
+   一个就绪通知后台任务**（见下节"就绪通知"）。
 
 6. **交给后端** — 把 `text` 写进 `inbox_path(alias)`，追加一条 history，返
    `routed=True`。
+
+## 就绪通知
+
+任何由 bridge 主动拉起 daemon 的场景（router 的 ensure_daemon_alive、
+autospawn worker 处理 `/proj N` 或 `0` 写进的队列项），spawn **成功**后必须
+启动一个后台 watch 任务，监听这个 alias 的 chats-loop skill 何时真激活，
+然后向用户广播就绪/失败。
+
+### 信号源
+
+mcp_bridge 在 child claude 第一次进入 `wait_for_message` 时 touch 一个
+marker 文件：
+
+```
+~/.claude/.chats-loop-active-<alias>
+```
+
+这个文件存在 = skill 已激活 = 用户消息真的能被消费。文件不出现 = skill
+没起来（trust 弹窗卡住、READY_MARKERS 不匹配、trigger 没进 TUI…）。
+
+### 行为契约
+
+`spawn.watch_ready(alias)` 是一个 `async` 函数，由调用 spawn 的位置
+`asyncio.create_task` 起：
+
+| 情况 | 动作 |
+|---|---|
+| `READY_NOTIFY_TIMEOUT` 内 marker 出现 | 写 outbox：`✅ 会话 <alias> 已就绪，发消息试试` |
+| `READY_NOTIFY_TIMEOUT` 超时 marker 仍不存在 | 写 outbox：`⚠️ 会话 <alias> 拉起超时，可能 child claude 卡在了某个弹窗。看 chat_sessions/<alias>/pty.log` |
+| 期间 daemon 进程死了 | 写 outbox：`⚠️ 会话 <alias> 启动后异常退出，看 daemon.log` |
+
+`READY_NOTIFY_TIMEOUT` 在 `core.spawn` 里（默认 60 秒——含 trust 弹窗 +
+TUI 渲染 + `/chats-loop` 触发 + skill 初始化 + 第一次 wait_for_message
+的累计时间）。
+
+### 为什么是写 outbox，而不是渠道单独发送
+
+outbox 是后端给前端发消息的现有通道——所有渠道都已经接好 outbox_watcher。
+通过 outbox 发就绪通知意味着：(1) 渠道一行代码不用动；(2) 用户在哪个渠道
+聊就在哪个渠道收到，自动多渠道适配；(3) 同样的通知在 web UI `/poll`
+也能拿到，无差别。
+
+唯一注意：outbox 是"最新一条待推"的单槽，watch_ready 写完通知后如果
+child claude 立刻又回了别的，可能盖掉就绪通知——所以**就绪通知必须在
+child claude 收到第一条消息之前发出去**，靠 marker 文件的 touch 时机
+天然保证。
+
+### 不发就绪通知的场景
+
+- 用户手动起的 daemon（`python -m chats_control_agents.backends.claude_code.daemon`）
+  ——他自己知道在等，不需要桥通知。
+- web dashboard 的"开始新会话"按钮——HTTP 请求本身会同步等 ready 后才返
+  回，UI 已经能反映状态。
 
 ## 为什么不让渠道自己做
 
