@@ -18,7 +18,7 @@ import logging
 from ..core import sessions as sx
 from ..core.paths import AUTOSPAWN_QUEUE_FILE
 from ..core.pid_track import _pid_alive
-from ..core.spawn import spawn_daemon_detached
+from ..core.spawn import spawn_daemon_detached, watch_ready
 
 
 log = logging.getLogger("web.autospawn")
@@ -73,6 +73,9 @@ async def autospawn_worker():
                 pid = spawn_daemon_detached(alias, cwd)
                 if pid:
                     _autospawn_running.add(alias)
+                    # Notify the user when chats-loop skill actually activates.
+                    # See docs/ROUTING.md "就绪通知".
+                    asyncio.create_task(watch_ready(alias, pid))
     except asyncio.CancelledError:
         log.info("autospawn worker cancelled")
         raise

@@ -14,15 +14,76 @@ import asyncio
 import logging
 import os
 import subprocess
+from datetime import datetime
+from pathlib import Path
 
 from . import sessions as sx
-from .paths import ROOT
+from .paths import ROOT, outbox_path
 from .pid_track import _pid_alive
 
 
 log = logging.getLogger("core.spawn")
 
 _HISTORICAL_CWD = str(ROOT.parent / "claude-code-account-switch")
+
+# Total time we'll wait for `~/.claude/.chats-loop-active-<alias>` to appear
+# after we spawn a daemon. Covers: TUI cold start, trust-folder dialog,
+# /chats-loop trigger, skill init, first wait_for_message. 60s is generous
+# but not absurd; the user pays nothing for a successful spawn since the
+# notify fires as soon as the marker shows up.
+READY_NOTIFY_TIMEOUT_SECS = 60.0
+_MARKER_DIR = Path.home() / ".claude"
+
+
+def _marker_path(alias: str) -> Path:
+    return _MARKER_DIR / f".chats-loop-active-{alias}"
+
+
+def _write_outbox_notice(alias: str, body: str) -> None:
+    """Drop a one-shot notice into the alias's outbox so every channel's
+    outbox_watcher forwards it to the user. Mirrors the daemon's notice
+    format so the watcher's dedup fingerprint behaves consistently."""
+    stamp = datetime.now().strftime("%H:%M:%S")
+    p = outbox_path(alias)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f"[{stamp}]\n{body}\n", encoding="utf-8")
+        log.info("ready-notify[%s]: %s", alias, body[:80])
+    except Exception as e:
+        log.warning("ready-notify[%s]: write failed: %s", alias, e)
+
+
+async def watch_ready(alias: str, daemon_pid: int) -> None:
+    """Background task: wait for the chats-loop skill to activate, then
+    write a user-facing notice via outbox. Started by anyone who just
+    spawned a daemon for `alias`.
+
+    Outcomes (always exactly one):
+      • marker file appears   → "✅ 已就绪"
+      • daemon process dies   → "⚠️ 启动后异常退出"
+      • timeout               → "⚠️ 拉起超时"
+    """
+    marker = _marker_path(alias)
+    deadline = asyncio.get_event_loop().time() + READY_NOTIFY_TIMEOUT_SECS
+    while asyncio.get_event_loop().time() < deadline:
+        if marker.exists():
+            _write_outbox_notice(
+                alias, f"✅ 会话 {alias!r} 已就绪，发消息试试"
+            )
+            return
+        if not _pid_alive(daemon_pid):
+            _write_outbox_notice(
+                alias,
+                f"⚠️ 会话 {alias!r} 启动后异常退出，"
+                f"看 chat_sessions/{alias}/daemon.log",
+            )
+            return
+        await asyncio.sleep(0.5)
+    _write_outbox_notice(
+        alias,
+        f"⚠️ 会话 {alias!r} 拉起超时（{int(READY_NOTIFY_TIMEOUT_SECS)}s 未就绪），"
+        f"可能 child claude 卡在某个弹窗。看 chat_sessions/{alias}/pty.log",
+    )
 
 
 def spawn_daemon_detached(alias: str, cwd: str) -> int | None:
@@ -95,6 +156,10 @@ async def ensure_daemon_alive(alias: str) -> bool:
     for _ in range(20):  # give the OS a moment to schedule the new daemon process
         if _pid_alive(spawned_pid):
             log.info("ensure[%s]: daemon pid=%s alive", alias, spawned_pid)
+            # Fire-and-forget readiness watcher. Notifies user (via outbox)
+            # once chats-loop skill activates, or surfaces a failure if it
+            # never does. See docs/ROUTING.md "就绪通知".
+            asyncio.create_task(watch_ready(alias, spawned_pid))
             return True
         await asyncio.sleep(0.1)
     log.warning("ensure[%s]: pid=%s never went live", alias, spawned_pid)
