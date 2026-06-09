@@ -32,6 +32,22 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+# Strip CSI escapes for ANSI-blind substring matching. Child claude is an
+# Ink TUI: it renders text with cursor-move (\x1b[1C), SGR color
+# (\x1b[38;2;R;G;Bm), and other CSI sequences interleaved between words.
+# A naive `"trust this folder" in buffer` never matches a buffer that
+# literally contains "\x1b[…mtrust\x1b[1Cthis\x1b[1Cfolder\x1b[…m" — both
+# the color and cursor-right escapes split the substring. Strip every
+# CSI sequence before scanning. Cursor-right also doesn't insert a space,
+# so we additionally collapse adjacent letters (caller's responsibility:
+# search for distinctive single words like "trust" if multi-word match
+# is brittle).  See docs/DAEMON-LIFECYCLE.md.
+_CSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def _ansi_blind(s: str) -> str:
+    return _CSI.sub("", s)
+
 try:
     from winpty import PtyProcess
 except ImportError:
@@ -70,10 +86,15 @@ TRIGGER_COMMAND = "/chats-loop"
 # that dialog instead of the chat input — \r selected option 1 ("yes")
 # and the slash command was silently discarded, leaving chats-loop never
 # activated and inbox messages never picked up.
+#
+# IMPORTANT: markers are matched against the ANSI-blind buffer (see
+# `_ansi_blind` above). Ink replaces spaces with `\x1b[1C` cursor-right
+# escapes, which strip to nothing — so a marker like "Welcome back" must
+# be spelled without the space ("Welcomeback") to match the rendered
+# text. The check site collapses adjacent matches in the stripped buffer.
 READY_MARKERS = [
-    "Welcome back",     # only shown on the main chat screen
-    "Tips for getting", # "Tips for getting started" panel of the welcome card
-    "What's new",       # changelog block on the welcome card
+    "Welcomeback",     # only shown on the main chat screen
+    "Tipsforgetting",  # "Tips for getting started" panel of the welcome card
 ]
 # Max seconds to wait for TUI ready before bailing
 READY_TIMEOUT = 30
@@ -289,8 +310,15 @@ def main() -> int:
         pty_log.write(text)
         pty_log.flush()
         buffer += text
+        # Ink TUI breaks words apart with cursor-right escapes; strip those
+        # before substring checks so "trust this folder" / "Welcome back"
+        # match the rendered text rather than the raw byte stream.
+        scan = _ansi_blind(buffer)
         # Trust-folder dialog detection — answer once, then keep reading.
-        if not trust_dismissed and "trust this folder" in buffer:
+        # Matched against the ANSI-blind buffer; Ink renders the prompt
+        # text as "Yes,Itrustthisfolder" once color/cursor-move escapes
+        # are stripped.
+        if not trust_dismissed and "trustthisfolder" in scan:
             try:
                 proc.write("\r")  # default selection is "1. Yes"
                 trust_dismissed = True
@@ -302,7 +330,7 @@ def main() -> int:
                 log.warning("trust-folder accept failed: %s", e)
             continue
         # Look for any ready marker
-        if any(marker in buffer for marker in READY_MARKERS):
+        if any(marker in scan for marker in READY_MARKERS):
             ready = True
             log.info("TUI ready after %.1fs (saw marker)", time.time() - start)
             print(f"[daemon] TUI ready after {time.time() - start:.1f}s")
