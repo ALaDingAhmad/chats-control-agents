@@ -42,7 +42,7 @@ python -m chats_control_agents.backends.claude_code.daemon [<alias>] [<cwd>]
 | `0`              | （`/proj` 之后）开空会话（cwd=用户主目录、不绑项目） |
 | `/list`          | 列出所有会话和状态                                  |
 | `/use <alias>`   | 切到指定会话                                        |
-| `/new <alias> [<cwd>]` | 新建会话（打印 daemon 启动命令）                  |
+| `/new`           | 同 `/proj` — 列项目；回 0 开空会话，回数字开 / 切项目 |
 | `/end <alias>`   | 结束会话（60s 内再发一次确认）                       |
 | `/rename <new>`  | 重命名当前会话（仅离线时）                          |
 | `/help`          | 帮助                                                |

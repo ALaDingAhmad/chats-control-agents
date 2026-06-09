@@ -15,16 +15,14 @@ queue writes, etc.) happen as side effects of _cmd_* helpers.
 """
 from __future__ import annotations
 
-import json
 import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from .autospawn import request_autospawn
 from .config import get_workspace_roots
-from .paths import ALIAS_RE, ROOT, meta_path, session_dir
+from .paths import ALIAS_RE, session_dir
 from .pid_track import _kill_pid, _pid_alive
 from .proj_choices import (
     PROJ_PICK_WINDOW_SECS,
@@ -97,9 +95,7 @@ def handle_command(text: str) -> str:
             return "用法：/use <alias>"
         return _cmd_use(args[0])
     if cmd == "new":
-        if not args:
-            return "用法：/new <alias> [<cwd>]"
-        return _cmd_new(args[0], args[1] if len(args) > 1 else None)
+        return _cmd_proj([])
     if cmd == "end":
         if not args:
             return "用法：/end <alias>（需要在 60s 内再发一次确认）"
@@ -120,7 +116,7 @@ def _help_text() -> str:
         "/proj — 列出工作空间下的项目（回复编号切换/启动）\n"
         "/list — 列出所有会话\n"
         "/use 「alias」— 切到指定会话\n"
-        "/new 「alias」「cwd」— 新建会话\n"
+        "/new — 同 /proj（列项目，回 0 开空会话，回数字开/切项目）\n"
         "/end 「alias」— 结束会话（60s 内再发一次确认）\n"
         "/rename 「new」— 重命名当前会话\n"
         "/help — 显示本帮助\n"
@@ -326,31 +322,6 @@ def _cmd_use(alias: str) -> str:
     online = bool(m.get("daemon_pid")) and _pid_alive(m.get("daemon_pid"))
     note = "" if online else f"\n⚠️ 该会话离线。在电脑跑：\n  python -m chats_control_agents.backends.claude_code.daemon {alias}"
     return f"已切到会话 {alias!r}。{note}"
-
-
-# ── /new ─────────────────────────────────────────────────────────────────
-def _cmd_new(alias: str, cwd: Optional[str]) -> str:
-    if not ALIAS_RE.match(alias):
-        return f"非法 alias：{alias!r}"
-    sd = session_dir(alias)
-    if sd.exists() and any(sd.iterdir()):
-        return f"会话 {alias!r} 已存在。/use {alias} 切过去，或换个名字。"
-    sd.mkdir(parents=True, exist_ok=True)
-    save_meta_for(alias, {
-        "alias": alias,
-        "cwd": cwd or "",
-        "daemon_pid": None,
-        "child_pid": None,
-        "created_at": datetime.now().isoformat(timespec="seconds"),
-    })
-    set_current(alias)
-    cwd_arg = f" {cwd}" if cwd else ""
-    return (
-        f"已创建会话 {alias!r}，并切到它。\n"
-        f"现在在电脑终端跑：\n"
-        f"  python -m chats_control_agents.backends.claude_code.daemon {alias}{cwd_arg}\n"
-        f"启动后你发的消息会自动到这个会话。"
-    )
 
 
 # ── /end ─────────────────────────────────────────────────────────────────
