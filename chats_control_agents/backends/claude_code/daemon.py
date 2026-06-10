@@ -21,16 +21,17 @@ Stop:   Ctrl+C in the daemon's terminal, OR `taskkill /pid <pid>` on the
 """
 from __future__ import annotations
 
-import atexit
-import json
-import logging
 import os
 import re
-import signal
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
+
+# Lifecycle: 通用 CLI 解析 / meta / pid 跟踪 / atexit 清理 — 见
+# chats_control_agents/core/daemon_lifecycle.py 和 docs/BACKEND-DESIGN.md
+from chats_control_agents.core import daemon_lifecycle as lc
+from chats_control_agents.core.paths import ROOT
 
 # Strip CSI escapes for ANSI-blind substring matching. Child claude is an
 # Ink TUI: it renders text with cursor-move (\x1b[1C), SGR color
@@ -54,10 +55,6 @@ except ImportError:
     print("ERROR: pywinpty not installed. Run: pip install pywinpty", file=sys.stderr)
     sys.exit(2)
 
-# Project root: chats_control_agents/backends/claude_code/daemon.py → parents[3]
-ROOT = Path(__file__).resolve().parents[3]
-# Per-alias log files so multiple daemons don't trample each other
-ALIAS_RE = re.compile(r"^[a-zA-Z0-9_\-一-鿿]{1,32}$")
 CLAUDE_BIN = (
     Path.home()
     / "AppData"
@@ -101,51 +98,12 @@ READY_TIMEOUT = 30
 # How long after sending trigger before we consider it "successfully entered"
 POST_TRIGGER_SETTLE = 6
 
-def _parse_args() -> tuple[str, str | None]:
-    """CLI: python -m chats_control_agents.backends.claude_code.daemon [<alias>] [<cwd>]
+# claude_code 历史默认 spawn cwd：ccs 工具目录，让 child claude 用 CCS 当前
+# 选中的账号（见 CLAUDE.md "daemon spawn child claude 的 cwd 不是 agent-bridge"）。
+_HISTORICAL_CWD = ROOT.parent / "claude-code-account-switch"
 
-    Both optional. If alias is omitted, one is generated from cwd as
-    `<basename>-<MMDD-HHMM>`. If both are omitted, cwd falls back to
-    claude-code-account-switch (the historical default spawn dir).
-    """
-    args = sys.argv[1:]
-    alias: str | None = None
-    cwd: str | None = None
-    # If first arg looks like an existing dir, treat all positional as cwd-only
-    # (legacy: previously CLI accepted just a cwd path).
-    if args and Path(args[0]).is_dir() and ("/" in args[0] or "\\" in args[0]):
-        cwd = args[0]
-    elif args:
-        if not ALIAS_RE.match(args[0]):
-            print(f"ERROR: invalid alias '{args[0]}'. allowed: a-zA-Z0-9_- and Chinese, 1-32 chars", file=sys.stderr)
-            sys.exit(2)
-        alias = args[0]
-        if len(args) >= 2 and Path(args[1]).is_dir():
-            cwd = args[1]
-    if alias is None:
-        # Defer import: chats_control_agents isn't on sys.path until daemon.py runs as -m
-        from chats_control_agents.core.sessions import make_alias_for_cwd
-        from chats_control_agents.core.paths import ROOT as _ROOT
-        # cwd for naming purposes: caller-given, else historical default
-        naming_cwd = cwd or str(_ROOT.parent / "claude-code-account-switch")
-        alias = make_alias_for_cwd(naming_cwd)
-    return alias, cwd
-
-
-ALIAS, CWD_ARG = _parse_args()
-SESSION_DIR = ROOT / "chat_sessions" / ALIAS
-SESSION_DIR.mkdir(parents=True, exist_ok=True)
-LOG_PATH = SESSION_DIR / "daemon.log"
-PTY_LOG_PATH = SESSION_DIR / "pty.log"
-META_PATH = SESSION_DIR / "meta.json"
-
-logging.basicConfig(
-    filename=str(LOG_PATH),
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
-    encoding="utf-8",
-)
-log = logging.getLogger("daemon")
+# CLI: python -m chats_control_agents.backends.claude_code.daemon [<alias>] [<cwd>]
+ALIAS, CWD_ARG = lc.parse_cli_args(default_cwd=_HISTORICAL_CWD)
 
 
 def _decode(b: bytes | str) -> str:
@@ -159,51 +117,26 @@ def _decode(b: bytes | str) -> str:
     return repr(b)
 
 
-def _load_meta() -> dict | None:
-    if not META_PATH.exists():
-        return None
-    try:
-        return json.loads(META_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-
-
-def _write_meta(meta: dict) -> None:
-    tmp = META_PATH.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(META_PATH)
-
-
 def main() -> int:
     if not CLAUDE_BIN.exists():
-        log.error("claude.exe not found at %s", CLAUDE_BIN)
         print(f"ERROR: claude.exe not found at {CLAUDE_BIN}", file=sys.stderr)
         return 2
 
-    log.info("=" * 60)
-    log.info("daemon starting alias=%s claude=%s", ALIAS, CLAUDE_BIN)
-    log.info("trigger='%s', ready_timeout=%ds", TRIGGER_COMMAND, READY_TIMEOUT)
+    # 决定 spawn cwd（CLI > meta 历史 > ccs 兜底 > $HOME）
+    spawn_cwd = lc.resolve_spawn_cwd(CWD_ARG, ALIAS, backend_default=_HISTORICAL_CWD)
+
+    # 初始化生命周期：日志 / session_dir / 初始 meta（含 backend=claude_code）
+    ctx = lc.init_lifecycle(alias=ALIAS, cwd=spawn_cwd, backend="claude_code")
+    log = ctx.log
+    log.info("claude=%s trigger='%s' ready_timeout=%ds", CLAUDE_BIN, TRIGGER_COMMAND, READY_TIMEOUT)
     print(f"[daemon] alias: {ALIAS}")
     print(f"[daemon] spawning {CLAUDE_BIN}")
-    print(f"[daemon] session dir: {SESSION_DIR}")
+    print(f"[daemon] session dir: {ctx.session_dir}")
+    print(f"[daemon] cwd: {spawn_cwd}")
 
     # Open pty log fresh each run
-    pty_log = open(PTY_LOG_PATH, "w", encoding="utf-8", errors="replace")
-
-    # Cwd: CLI arg → meta.json saved cwd → claude-code-account-switch → home
-    if CWD_ARG and Path(CWD_ARG).is_dir():
-        spawn_cwd = CWD_ARG
-    else:
-        prev_meta = _load_meta()
-        prev_cwd = (prev_meta or {}).get("cwd") if prev_meta else None
-        if prev_cwd and Path(prev_cwd).is_dir():
-            spawn_cwd = prev_cwd
-        else:
-            spawn_cwd = str(Path(__file__).parent.parent / "claude-code-account-switch")
-    if not Path(spawn_cwd).exists():
-        spawn_cwd = str(Path.home())  # safe fallback
-    log.info("spawn cwd=%s", spawn_cwd)
-    print(f"[daemon] cwd: {spawn_cwd}")
+    pty_log_path = ctx.session_dir / "pty.log"
+    pty_log = open(pty_log_path, "w", encoding="utf-8", errors="replace")
 
     # Spawn with --dangerously-skip-permissions so mcp tool calls don't pop
     # interactive prompts. Crucially: set CHATS_LOOP_ALIAS so the child claude
@@ -218,68 +151,28 @@ def main() -> int:
     log.info("spawned pid=%s", proc.pid)
     print(f"[daemon] claude pid={proc.pid}")
 
-    # Write meta so web_server can list sessions and check liveness
-    _write_meta({
-        "alias": ALIAS,
-        "cwd": spawn_cwd,
-        "daemon_pid": os.getpid(),
-        "child_pid": proc.pid,
-        "created_at": datetime.now().isoformat(timespec="seconds"),
-        "trigger": TRIGGER_COMMAND,
-    })
+    # 补 meta：child_pid + 这个 backend 专属字段
+    lc.write_meta(ctx, child_pid=proc.pid, trigger=TRIGGER_COMMAND)
+    lc.record_spawned_child(ctx, proc.pid)
 
-    # Append child PID + create_time to spawned_pids.jsonl so cleanup tooling
-    # can later identify daemon-spawned children even after this daemon exits.
-    # See sessions.list_daemon_child_pids() for the read side.
-    try:
-        import psutil
-        ct = psutil.Process(proc.pid).create_time()
-    except Exception as e:
-        log.warning("psutil create_time failed for child %s: %s", proc.pid, e)
-        ct = None
-    try:
-        rec = {
-            "pid": proc.pid,
-            "create_time": ct,
-            "spawned_at": datetime.now().isoformat(timespec="seconds"),
-            "daemon_pid": os.getpid(),
-        }
-        with (SESSION_DIR / "spawned_pids.jsonl").open("a", encoding="utf-8") as f:
-            f.write(json.dumps(rec) + "\n")
-    except Exception as e:
-        log.warning("append spawned_pids.jsonl failed: %s", e)
-
-    # Make sure we kill the child if daemon dies unexpectedly
-    def _cleanup():
+    # backend 专属清理：杀 child claude + 关 pty 日志
+    def _on_exit() -> None:
         try:
             if proc.isalive():
                 proc.terminate(force=True)
                 log.info("cleanup: killed child pid=%s", proc.pid)
         except Exception as e:
-            log.warning("cleanup failed: %s", e)
+            log.warning("cleanup kill failed: %s", e)
         try:
             pty_log.close()
         except Exception:
             pass
-        # Mark meta as offline (keep file so /list still shows the session)
-        try:
-            m = _load_meta() or {}
-            m["daemon_pid"] = None
-            m["child_pid"] = None
-            m["last_exit_at"] = datetime.now().isoformat(timespec="seconds")
-            _write_meta(m)
-        except Exception:
-            pass
 
-    atexit.register(_cleanup)
+    lc.install_cleanup(ctx, on_exit=_on_exit)
 
-    def _sigint(signum, frame):
-        log.info("SIGINT received, shutting down")
-        print("\n[daemon] shutting down...")
-        _cleanup()
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, _sigint)
+    # 下面保留同名 SESSION_DIR / PTY_LOG_PATH 别名，避免改动后续 TUI 逻辑
+    SESSION_DIR = ctx.session_dir
+    PTY_LOG_PATH = pty_log_path
 
     # Phase 1: wait for TUI to be "ready"
     #
