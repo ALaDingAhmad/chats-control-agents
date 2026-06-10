@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import datetime
 from pathlib import Path
 
 from .autospawn import request_autospawn
@@ -32,6 +31,7 @@ from .proj_choices import (
 )
 from .projects import list_projects
 from .sessions import (
+    create_session_dir,
     get_current,
     list_sessions,
     load_meta_for,
@@ -226,15 +226,8 @@ def _cmd_pick_proj(n: int) -> str:
         from .sessions import make_alias_for_cwd
         home_cwd = str(Path.home())
         alias = make_alias_for_cwd(home_cwd)
-        sd = session_dir(alias)
-        sd.mkdir(parents=True, exist_ok=True)
-        save_meta_for(alias, {
-            "alias": alias,
-            "cwd": home_cwd,
-            "daemon_pid": None,
-            "child_pid": None,
-            "created_at": datetime.now().isoformat(timespec="seconds"),
-        })
+        # 微信/命令行入口建会话只起 claude_code；要 hermes_acp 走 dashboard
+        create_session_dir(alias, home_cwd, backend="claude_code")
         try:
             set_current(alias)
         except Exception:
@@ -287,15 +280,7 @@ def _cmd_pick_proj(n: int) -> str:
         n_suffix += 1
         alias = f"{base}_{n_suffix}"
 
-    sd = session_dir(alias)
-    sd.mkdir(parents=True, exist_ok=True)
-    save_meta_for(alias, {
-        "alias": alias,
-        "cwd": p["abs_path"],
-        "daemon_pid": None,
-        "child_pid": None,
-        "created_at": datetime.now().isoformat(timespec="seconds"),
-    })
+    create_session_dir(alias, p["abs_path"], backend="claude_code")
     try:
         set_current(alias)
     except Exception:

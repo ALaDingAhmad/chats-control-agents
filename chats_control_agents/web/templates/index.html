@@ -141,6 +141,13 @@
   <div class="modal-box">
     <h2>开始新会话</h2>
     <div class="hint">新会话会用 <code>&lt;项目名&gt;-&lt;MMDD-HHMM&gt;</code> 命名。</div>
+    <div class="field">
+      <label>AI 后端</label>
+      <select id="m-backend" style="width:100%;padding:9px 11px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;font-family:inherit;box-sizing:border-box;">
+        <option value="claude_code">Claude Code（本地 TUI，首次约 30s）</option>
+        <option value="hermes_acp">Hermes ACP（LexAI reasoning，首次约 10s）</option>
+      </select>
+    </div>
     <div class="row">
       <button type="button" id="m-chat" class="secondary">💬 纯聊天 (cwd = home)</button>
     </div>
@@ -365,12 +372,13 @@ document.getElementById('tb-new').addEventListener('click', openModal);
 document.getElementById('m-cancel').addEventListener('click', closeModal);
 
 async function createSession(mode, project_cwd) {
-  mStatus.textContent = '正在拉起 daemon（最多 15s）…'; mStatus.className = 'msg';
+  const backend = document.getElementById('m-backend').value || 'claude_code';
+  mStatus.textContent = `正在拉起 ${backend} daemon（最多 60s）…`; mStatus.className = 'msg';
   try {
     const r = await fetch('/session/new', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({mode, project_cwd}),
+      body: JSON.stringify({mode, project_cwd, backend}),
     });
     const d = await r.json();
     if (d.ok) {

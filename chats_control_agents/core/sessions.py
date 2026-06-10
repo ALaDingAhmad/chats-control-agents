@@ -106,6 +106,35 @@ def save_meta_for(alias: str, meta: dict) -> None:
     tmp.replace(p)
 
 
+# ── Create a new session directory + initial meta ────────────────────────
+def create_session_dir(
+    alias: str,
+    cwd: str,
+    backend: str = "claude_code",
+) -> None:
+    """建会话目录并写初始 meta.json。
+
+    所有"建会话"入口（命令行 /proj、web dashboard 新建按钮、未来的 CLI）
+    都该走这条路，避免散在多处的字段手写漏掉 `backend`——`backend` 字段
+    决定 `core.spawn._resolve_daemon_module` 起哪个 daemon。
+
+    meta 里 daemon_pid/child_pid 留 None，由 daemon 自己启动后用
+    `daemon_lifecycle.write_meta` 补。
+    """
+    if not ALIAS_RE.match(alias):
+        raise ValueError(f"invalid alias: {alias!r}")
+    sd = session_dir(alias)
+    sd.mkdir(parents=True, exist_ok=True)
+    save_meta_for(alias, {
+        "alias": alias,
+        "cwd": cwd,
+        "backend": backend,
+        "daemon_pid": None,
+        "child_pid": None,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    })
+
+
 # ── Session listing ──────────────────────────────────────────────────────
 def list_sessions() -> list[dict]:
     """Scan chat_sessions/ for all aliases. Sorted: online first, then by

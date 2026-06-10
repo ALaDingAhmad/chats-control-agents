@@ -59,15 +59,18 @@ async def settings(request):
 
 
 async def new_session(request):
-    """POST /session/new {mode: 'chat'|'project', project_cwd?: str}
+    """POST /session/new {mode: 'chat'|'project', project_cwd?: str, backend?: str}
     Dashboard "start new session" button hits this. Spawns a fresh daemon
     with auto-generated alias and marks it current.
+
+    backend 缺省 "claude_code"，可传 "hermes_acp"——决定起哪个 daemon。
     """
     from ..spawn_helpers import spawn_new_session
     body = await request.json()
     mode = (body.get("mode") or "").strip()
     project_cwd = (body.get("project_cwd") or "").strip() or None
-    result = await spawn_new_session(mode, project_cwd)
+    backend = (body.get("backend") or "claude_code").strip()
+    result = await spawn_new_session(mode, project_cwd, backend=backend)
     return JSONResponse(result)
 
 
