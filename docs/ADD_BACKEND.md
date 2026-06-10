@@ -1,64 +1,67 @@
 # 加新后端
 
-后端是"把用户消息变成回复"的那一端：Claude Code TUI（当前）、OpenClaw、
-Hermes、直接 Anthropic API、本地 LLM……
+后端是"把用户消息变成回复"的那一端：Claude Code TUI（当前）、Hermes ACP、
+OpenClaw、直接 Anthropic API、本地 LLM……
+
+设计原则、daemon 站位、跨 backend 能力归属，先看
+[`docs/BACKEND-DESIGN.md`](BACKEND-DESIGN.md)。这份是怎么动手。
 
 ## 骨架
 
 ```
 chats_control_agents/backends/<name>/
 ├── __init__.py
-├── adapter.py     （可选）实现 backends.base.Backend
-└── …              后端特有的文件（daemon / RPC client / …）
+├── daemon.py       backend 自己的 daemon 入口（必须有）
+└── …               backend 特有的文件（rpc client / mcp bridge / …）
 ```
 
-## 两种后端形态
+## 两个关键决定
 
-### 进程型（如 claude_code）
+加 backend 前先回答两个问题：
 
-- **每个会话一个 daemon 进程**（per alias）。daemon 在 PTY 里 spawn 真正的
-  agent（如 `claude.exe`），保活、drain 输出。
-- agent 通过加载进自己宿主进程里的 **MCP 工具**和 bridge 通信。工具读写
-  `chat_sessions/<alias>/inbox.txt` 和 `outbox.txt`。
-- bridge ↔ 后端的边界就是文件。松耦合，任一边重启都能扛。
+### 1. daemon 在不在消息路径上？
 
-优点：
-- agent 拿到完整 TUI / 交互环境。已有工具（文件操作、shell、MCP 服务器）
-  透明可用。
-- bridge 不需要了解 agent 的协议。
+看下游 agent 提供的接口：
 
-缺点：
-- 每个会话开销大：完整 TUI 进程、MCP 服务器等。
-- spawn 慢（claude_code 大概 5-10 秒）。
-- agent 状态可能漂移（如 rate-limit 弹窗挡住 TUI —— 看
-  `daemon.py` 的 rate-limit 看门狗）。
+- **能在下游进程内 host 我们的代码**（MCP server、插件、SDK 注入）→ **daemon 路径外**。
+  daemon 只看护下游，消息流转由内嵌组件自己 IO 文件。`claude_code` 是这种 ——
+  child claude 加载 `mcp_bridge.py` 当 MCP 服务器，mcp_bridge 自己读 inbox 写 outbox。
+- **只暴露外部 RPC / API / stdio** → **daemon 路径内**。daemon 自己持有连接、
+  poll inbox、聚合下游事件、写 outbox。`hermes_acp` 是这种 —— ACP 是 stdio
+  JSON-RPC，agent-bridge 必须在外面持有那个 socket。
 
-### API 型（假想：anthropic_api）
+不要为了"和 claude_code 对称"硬选路径外 —— 下游协议是什么样、daemon 就长什么样。
 
-- 无状态 HTTP 后端。没有 daemon，没有 session 绑定的进程。每条入站消息
-  转成一次 API 调用，带上会话历史。
-- bridge 在 `history.json` 里存对话状态，每轮 replay 给 API。
+### 2. 进程型还是无状态型？
 
-优点：
-- 没有 spawn 成本，没有进程管理。
-- 容易扩，容易推理。
+- **进程型**（`claude_code` / `hermes_acp`）：每 alias 一个 daemon 进程，
+  daemon 把 `meta.json.daemon_pid` 写上，`is_session_alive` 靠这个判活。
+- **无状态型**（假想 `anthropic_api`）：没有 daemon，每条入站消息触发一次 API
+  调用，带上 `history.json`。`ensure_session` 是 no-op，`meta.json.daemon_pid` 始
+  终为 null。bridge 显式管 tool calls / 循环 / history 截断。
 
-缺点：
-- bridge 得显式管 tool calls / 循环 / history 截断。
-- 没交互 TUI；用户没法通过 agent 跑 shell 命令，除非 bridge 这边再加胶水。
+进程型适合下游是个"活的 agent"（自己会主动用工具、思考多轮），无状态型适合
+下游是个"无记忆模型 API"。
 
 ## 必须做的事
 
 1. **拉起 / 连接**：`ensure_session(alias, cwd)` —— 保证这个 alias 有东西能
-   回话。进程型：daemon 死了就 spawn 一个。API 型：no-op。
-2. **接消息**：读 `inbox_path(alias)`。进程型：agent 进程里的 MCP 工具读。
-   API 型：后端 adapter 里的 worker 读。
+   回话。进程型：daemon 死了就 spawn 一个。无状态型：no-op。
+2. **接消息**：读 `inbox_path(alias)`。路径外 daemon：下游进程内的 MCP 工具读
+   （claude_code/mcp_bridge.py）。路径内 daemon：daemon 自己 poll
+   （hermes_acp/daemon.py 计划）。
 3. **回复**：写 `outbox_path(alias)`，格式 `"[HH:MM:SS]\n<reply>\n"`，让 web
-   `/poll` 和微信 outbox watcher 能识别。
-4. **跟踪存活**：写 `meta.json` 含 `daemon_pid` / `child_pid`，让
-   `sessions.list_sessions()` 能报告 online 状态。
-5. **记录 spawn**：追加到 `spawned_pids.jsonl`，让清理工具能区分后端 spawn
-   的进程和用户手开的（之前撞过孤儿 claude.exe 群杀的坑）。
+   `/poll` 和微信 outbox watcher 能识别。outbox 是**覆写**不是追加。
+4. **跟踪存活**：写 `meta.json` 含 `daemon_pid` / `child_pid` / `backend`（新
+   字段，决定 `core/spawn.py` 启动哪个模块），让 `sessions.list_sessions()`
+   能报告 online 状态。
+5. **记录 spawn**：daemon 自己 spawn 的子进程追加到 `spawned_pids.jsonl`，让
+   清理工具能区分后端 spawn 的进程和用户手开的（之前撞过孤儿 claude.exe 群
+   杀的坑）。
+
+通用部分（CLI 解析 / meta 写 / pid 跟踪 / atexit 清理）由
+`core/daemon_lifecycle.py` 提供，新 daemon 调用它起骨架就行，不要复制粘贴
+claude_code/daemon.py 的胶水代码。
 
 ## 参考实现：claude_code
 
@@ -92,6 +95,12 @@ child claude 时设这个 env。
 `backends/base.py` 定义了 `Backend`，含 `ensure_session / send /
 is_session_alive / end_session / session_status`。现有 claude_code 代码
 **还没继承**——ABC 是文档化契约，不强制。
+
+实际上 agent-bridge 当前没有任何调用方在用 `Backend` 抽象：router 直接写
+inbox.txt、web 直接读 outbox.txt，backend 的实现细节通过 `meta.json.backend`
+字段告诉 `core/spawn.py` 起哪个 daemon 模块。这层 ABC 是给未来留位置的，
+不是给现在用的——加新 backend 时不需要继承它，照 hermes_acp 的形态写
+daemon 即可。
 
 ## 常见坑
 

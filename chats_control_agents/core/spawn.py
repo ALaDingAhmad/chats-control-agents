@@ -86,12 +86,34 @@ async def watch_ready(alias: str, daemon_pid: int) -> None:
     )
 
 
+# backend 名 → daemon 模块路径。新加 backend 时在这里登记一条。
+# 不在这里登记的 backend 起不来——这是有意的最小注册表，避免 import 时副作用。
+_BACKEND_DAEMON_MODULES = {
+    "claude_code": "chats_control_agents.backends.claude_code.daemon",
+    "hermes_acp":  "chats_control_agents.backends.hermes_acp.daemon",
+}
+
+
+def _resolve_daemon_module(alias: str) -> str:
+    """根据 alias 的 meta.json 选 daemon 模块。缺省 claude_code 向后兼容。"""
+    meta = sx.load_meta_for(alias) or {}
+    backend = meta.get("backend") or "claude_code"
+    mod = _BACKEND_DAEMON_MODULES.get(backend)
+    if mod is None:
+        log.warning("spawn[%s]: unknown backend %r, falling back to claude_code", alias, backend)
+        return _BACKEND_DAEMON_MODULES["claude_code"]
+    return mod
+
+
 def spawn_daemon_detached(alias: str, cwd: str) -> int | None:
     """Spawn the daemon detached from this process. Returns PID or None on failure.
 
     Windows: DETACHED + CREATE_NEW_PROCESS_GROUP + CREATE_NO_WINDOW so the
     daemon survives web_server restart and doesn't pop a console window.
     Unix: start_new_session to detach from the caller's process group.
+
+    具体起哪个 backend 的 daemon 由 `meta.json.backend` 字段决定（缺省
+    `claude_code` 向后兼容）。
     """
     log_path = sx.session_dir(alias) / "daemon_stdout.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -114,12 +136,14 @@ def spawn_daemon_detached(alias: str, cwd: str) -> int | None:
         kwargs["creationflags"] = DETACHED | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
     else:
         kwargs["start_new_session"] = True
+
+    daemon_module = _resolve_daemon_module(alias)
     try:
         proc = subprocess.Popen(
-            ["python", "-m", "chats_control_agents.backends.claude_code.daemon", alias, cwd],
+            ["python", "-m", daemon_module, alias, cwd],
             **kwargs,
         )
-        log.info("spawn[%s]: pid=%s cwd=%s", alias, proc.pid, cwd)
+        log.info("spawn[%s]: backend-module=%s pid=%s cwd=%s", alias, daemon_module, proc.pid, cwd)
         return proc.pid
     except Exception as e:
         log.warning("spawn[%s]: failed: %s", alias, e)

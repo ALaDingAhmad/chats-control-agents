@@ -135,7 +135,25 @@ child claude 怎么拉起（trust-folder 对话框、ready 标记、trigger、dr
 循环）、rate-limit 看门狗、怎么加新弹窗处理器（工具授权、操作确认）——
 详见 [`docs/DAEMON-LIFECYCLE.md`](DAEMON-LIFECYCLE.md)。
 
+## Backend 设计：daemon 在不在消息路径上由 backend 决定
+
+`claude_code` 是"daemon 路径外"型：daemon 只看护 child claude，消息流转由
+child claude 内嵌的 mcp_bridge 自己 IO 文件。daemon 死了消息不断。
+
+将来要接的 `hermes_acp` 是"daemon 路径内"型：daemon 自己持有 ACP stdio
+socket，自己 poll inbox 写 outbox。daemon 死了消息立刻断。
+
+两种站位都合法 —— 取决于下游 agent 的协议形态（能不能在它进程内 host 我们
+的代码）。**不要为了"统一"硬改 claude_code 链路**。详见
+[`docs/BACKEND-DESIGN.md`](BACKEND-DESIGN.md)。
+
+跨 backend 的能力（撤回 / 流式 / 多用户路由 / 限流 / usage 上报）该在哪
+一层做，那份文档里有归属表。简短规则：决策需要的视角在哪一层就在哪一层
+做，daemon 视角 = 一个 alias 一个下游 agent，所以多 session / 多 peer 类
+的决策都在 core / router 层。
+
 ## 加渠道 / 加后端
 
 详见 [`docs/ADD_CHANNEL.md`](ADD_CHANNEL.md) 和
-[`docs/ADD_BACKEND.md`](ADD_BACKEND.md)。
+[`docs/ADD_BACKEND.md`](ADD_BACKEND.md)。设计原则在
+[`docs/BACKEND-DESIGN.md`](BACKEND-DESIGN.md)。
