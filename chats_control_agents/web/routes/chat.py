@@ -110,6 +110,7 @@ async def dashboard_status(request):
         "current": sx.get_current(),
         "sessions_total": len(sessions),
         "sessions_online": online,
+        "web_port": cfg.get_web_port(),
         "claude": {
             "mcp_registered": mcp_registered,
         },

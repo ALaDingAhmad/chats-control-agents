@@ -175,7 +175,7 @@
   </div>
 
   <footer>
-    日志：<code>web_server.log</code> · 端口 <code>127.0.0.1:8765</code>
+    日志：<code>web_server.log</code> · 端口 <code id="footer-port">127.0.0.1:--</code>
   </footer>
 </main>
 
@@ -184,6 +184,11 @@ async function refresh() {
   try {
     const r = await fetch('/dashboard/status');
     const d = await r.json();
+
+    // footer 端口
+    if (d.web_port) {
+      document.getElementById('footer-port').textContent = `127.0.0.1:${d.web_port}`;
+    }
 
     // claude code card
     const claudeMcp = document.getElementById('claude-mcp');

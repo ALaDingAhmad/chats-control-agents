@@ -2,7 +2,7 @@
 
 Run:
     python -m chats_control_agents.web.server
-Then open http://127.0.0.1:8765/
+Then open http://127.0.0.1:<port>/  （端口在 config.json 的 web_port，缺省 8765）
 
 Per-domain handlers live in routes/; long-lived runtime (WeChat long-poll,
 autospawn worker) live in weixin_runtime.py and autospawn.py respectively.
@@ -106,11 +106,12 @@ app = Starlette(
 def main() -> None:
     from ..core import config as cfg
     from ..core.paths import SESSIONS_ROOT
+    port = cfg.get_web_port()
     log.info("=" * 60)
-    log.info("web server starting on 127.0.0.1:8765")
+    log.info("web server starting on 127.0.0.1:%d", port)
     log.info("sessions_root=%s current=%s", SESSIONS_ROOT, sx.get_current())
     log.info("workspace_roots=%s", [str(r) for r in cfg.get_workspace_roots()])
-    uvicorn.run(app, host="127.0.0.1", port=8765, log_level="warning")
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
 
 if __name__ == "__main__":

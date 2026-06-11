@@ -228,3 +228,12 @@ backend 再考虑抽到 paths.py 之类的更底层。
   `/list`。**不**在 `load_meta_for` 里做，避免给底层 read 路径加副作用——
   只在"全表扫描"路径（list_sessions）顺带做。PID 复用风险未处理（todo：
   init_lifecycle 时写 daemon_create_time，比对再判活）。
+- **2026-06-11**：web 端口移到 `config.json:web_port`（缺省 8765）。理由：
+  本机被别的项目占了 8765，必须能改。代码里所有"非例外位"全部走
+  `core.config.get_web_port()` 单一来源。**例外**：hook 副本不能动态读
+  config——它装在 `~/.claude/hooks/` 跑在 child claude 的环境，没法
+  import 项目包。改用 install 时渲染——源文件里加 `# CHATS_BRIDGE_WEB_PORT_LINE`
+  标记行，install.py 用 str.replace 注入当前值。所以改端口要重跑
+  `install/install.py --hook`。同时删了过期的 `scripts/restart_all.ps1`
+  （路径名还指向 claude-mcp-bridge 老仓库，调用的 `claude_daemon.py` 都
+  不存在了），换成 `scripts/start_web_detached.py` + `scripts/stop_web.py`。

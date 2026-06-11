@@ -9,7 +9,7 @@ Strategy:
 
 What this does NOT touch:
   - User-launched claude.exe (never logged in spawned_pids.jsonl)
-  - The web_server.py process (separate concern; use _restart_all.ps1)
+  - The web_server.py process (separate concern; use `python -m scripts.stop_web`)
   - This script's own python process (unless someone logged it, which would
     be a bug)
 

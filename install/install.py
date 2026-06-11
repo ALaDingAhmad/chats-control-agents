@@ -188,26 +188,58 @@ def uninstall_skill(dry: bool) -> None:
 
 
 # ── Component: hook script + settings.json registration ──────────────────
+def _render_hook_source(src_text: str, port: int) -> str:
+    """把源文件里的 8765 端口换成 config.json:web_port 的值。
+
+    只替换标记行：含 `# CHATS_BRIDGE_WEB_PORT_LINE` 注释那一行的 `8765`。
+    避免误伤别处恰好出现的 `8765` 字面量。
+    """
+    out_lines: list[str] = []
+    for line in src_text.splitlines(keepends=True):
+        if "# CHATS_BRIDGE_WEB_PORT_LINE" in line and "8765" in line:
+            line = line.replace("8765", str(port))
+        out_lines.append(line)
+    return "".join(out_lines)
+
+
 def install_hook(dry: bool) -> None:
     section("Hook (chats_loop_pretool_hook.py + ~/.claude/settings.json)")
     src = INSTALL_DIR / "hooks" / HOOK_FILENAME
     if not src.is_file():
         raise SystemExit(f"ERROR: source hook missing: {src}")
     dst_script = HOOKS_DIR / HOOK_FILENAME
-    # 1. copy script
-    if dst_script.exists() and dst_script.read_bytes() == src.read_bytes():
-        ok("hook script already up-to-date")
+
+    # 渲染：读 config.json:web_port，把 hook 里的端口字面值替换掉
+    # 项目根 = INSTALL_DIR.parent
+    rendered_src: str
+    rendered_port: int
+    try:
+        sys.path.insert(0, str(INSTALL_DIR.parent))
+        from chats_control_agents.core.config import get_web_port  # type: ignore
+        rendered_port = get_web_port()
+    except Exception as e:
+        info(f"读 config.json:web_port 失败，回退 8765：{e}")
+        rendered_port = 8765
+    finally:
+        if str(INSTALL_DIR.parent) in sys.path:
+            sys.path.remove(str(INSTALL_DIR.parent))
+    rendered_src = _render_hook_source(src.read_text(encoding="utf-8"), rendered_port)
+
+    # 1. write rendered script (跟 dst 现有内容比较，无变化就不动)
+    dst_existing = dst_script.read_text(encoding="utf-8") if dst_script.exists() else None
+    if dst_existing == rendered_src:
+        ok(f"hook script already up-to-date (port={rendered_port})")
     else:
         if dst_script.exists():
             bak = _backup_file(dst_script, dry)
             if bak and not dry:
                 ok(f"backup → {bak.name}")
         if dry:
-            info(f"[dry-run] would copy {src.name} → {dst_script}")
+            info(f"[dry-run] would render {src.name} (port={rendered_port}) → {dst_script}")
         else:
             dst_script.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dst_script)
-            ok(f"copied → {dst_script}")
+            dst_script.write_text(rendered_src, encoding="utf-8")
+            ok(f"rendered → {dst_script}  (port={rendered_port})")
     # 2. settings.json registration
     data = _load_json(SETTINGS_JSON)
     hooks_root = data.setdefault("hooks", {})

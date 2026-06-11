@@ -21,6 +21,7 @@
 - **全局单选中 alias**：`chat_sessions/_current.txt` 一个文件，所有 weixin/web 入站消息都路由到它。多用户路由要按 `peer_id` 分流，目前没做。
 - **daemon spawn child claude 的 cwd 不是 agent-bridge 自己**，而是 `D:/aiproject/claude-code-account-switch`（ccs 工具目录），这样 child claude 用 CCS 当前选中的账号。不要假定 child claude 跟 daemon 在同一目录。
 - **现在有两个 backend：`claude_code` 和 `hermes_acp`**。`meta.json.backend` 字段决定起哪个 daemon（`core.spawn._resolve_daemon_module`）。命令行入口（微信 `/proj` / `/new`）读 `chat_sessions/_default_backend.txt`（缺省 `claude_code`），`/backend <name>` 命令改它；dashboard 建会话用 modal 下拉选，不读此文件。**新加 backend 要同步 3 处**：`core.sessions.KNOWN_BACKENDS`、`core.spawn._BACKEND_DAEMON_MODULES`、`web.spawn_helpers._KNOWN_BACKENDS`。详见 `docs/BACKEND-DESIGN.md`。
+- **web 端口在 `config.json:web_port`**，缺省 8765。代码里**不**写死端口——`core.config.get_web_port()` 是单一来源，server / dashboard UI / start_web_detached 都读它。**例外**：hook 副本 `~/.claude/hooks/chats_loop_pretool_hook.py` 是 install.py 装的时候渲染一次（源文件里 `# CHATS_BRIDGE_WEB_PORT_LINE` 标记行被替换）。**改了 `web_port` 必须重跑 `python install/install.py --hook`**——否则 hook 还会 push 到老端口。
 
 ## 已知坑（容易再踩）
 
@@ -37,7 +38,7 @@
 一个活动会话有 3 层进程，三者父子关系是嵌套的：
 
 ```
-web_server.py (Starlette, 8765)
+web_server.py (Starlette, port = config.json:web_port，缺省 8765)
   └─ subprocess: daemon.py (per alias, detached)
        └─ PtyProcess: claude.exe (child claude, cwd=ccs 目录)
             └─ subprocess: mcp_bridge.py (stdio, env CHATS_LOOP_ALIAS=<alias>)

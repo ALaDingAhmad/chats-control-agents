@@ -20,11 +20,20 @@ python install/install.py
 #    默认 ["D:/aiproject", "F:/wslshare"]，按需改 config.json
 
 # 4. 起 web server
+#    端口在 config.json 的 web_port 字段，缺省 8765
 python -m chats_control_agents.web.server
-# → http://127.0.0.1:8765/
+# → http://127.0.0.1:<web_port>/
+#
+# 想关掉终端不影响服务：
+#   python -m scripts.start_web_detached   # 后台起，pid 写 web_server.pid
+#   python -m scripts.stop_web             # 读 pid 文件、终止
+# 仅 Windows。
+#
+# 改了 web_port 之后：必须重跑 install/install.py --hook，让 hook 副本
+# 跟上新端口（hook 不动态读 config，是装的时候渲染一次）
 
 # 5. （可选）连微信
-#    打开 http://127.0.0.1:8765/weixin，用手机微信扫码
+#    打开 http://127.0.0.1:<web_port>/weixin，用手机微信扫码
 
 # 6. 给某个项目开 Claude Code 会话
 #    可通过 dashboard 的"开始新会话"按钮、聊天里发 /proj，或手动：
@@ -63,8 +72,9 @@ docs/
 ├── ADD_CHANNEL.md     加新渠道的步骤
 └── ADD_BACKEND.md     加新后端的步骤
 scripts/
-├── kill_daemon_children.py     安全杀掉所有后端 spawn 的进程
-└── restart_all.ps1             Windows：全栈重启
+├── start_web_detached.py       后台起 web_server（关终端不影响）
+├── stop_web.py                 停掉 detached 起的 web_server
+└── kill_daemon_children.py     安全杀掉所有后端 spawn 的进程
 ```
 
 数据流图和模块表见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。

@@ -2,7 +2,8 @@
 name: chats-loop
 description: |-
   Long-running relay between this terminal and a remote web user reaching
-  Claude through a browser bridge (web_server.py on localhost:8765). Once
+  Claude through a browser bridge (web_server.py on localhost; port set
+  by agent-bridge config.json:web_port, default 8765). Once
   invoked, Claude enters a never-ending loop using the `cca-msg` MCP server:
   wait_for_message → reply → send_chat_response → wait_for_message.
 

@@ -34,7 +34,10 @@ import urllib.request
 from pathlib import Path
 
 LOG_PATH = Path.home() / ".claude" / "hooks" / "chats_loop_pretool_hook.log"
-WEB_PUSH_URL = "http://127.0.0.1:8765/relay-push"
+# 端口在 install/install.py 装的时候按 config.json:web_port 渲染。
+# 源文件里写默认 8765；改了 config.json 必须重跑 `install/install.py --hook`，
+# 否则这里仍是老端口、hook 就会 push 到错的 server。
+WEB_PUSH_URL = "http://127.0.0.1:8765/relay-push"  # CHATS_BRIDGE_WEB_PORT_LINE
 
 logging.basicConfig(
     filename=str(LOG_PATH),

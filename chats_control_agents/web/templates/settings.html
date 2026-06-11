@@ -193,7 +193,7 @@
   <section class="tab" id="tab-system">
     <div class="card">
       <h2>运行信息</h2>
-      <div class="kv"><span>端口</span><b>127.0.0.1:8765</b></div>
+      <div class="kv"><span>端口</span><b id="sys-port">127.0.0.1:--</b></div>
       <div class="kv"><span>web_server 日志</span><b><code>web_server.log</code></b></div>
       <div class="kv"><span>当前会话</span><b id="sys-current">--</b></div>
       <div class="kv"><span>workspace 根</span><b id="sys-roots">--</b></div>
@@ -576,6 +576,9 @@ async function refreshSystem() {
     document.getElementById('sys-current').textContent = d.current || '(无)';
     document.getElementById('sys-roots').textContent =
       (d.workspace_roots || []).join(' · ') || '--';
+    if (d.web_port) {
+      document.getElementById('sys-port').textContent = `127.0.0.1:${d.web_port}`;
+    }
   } catch (e) { /* silent */ }
 }
 </script>

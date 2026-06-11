@@ -27,6 +27,9 @@ Thumbs.db
 *.tmp
 *.json.tmp
 
+# Runtime pid files (start_web_detached.py 写)
+*.pid
+
 # Sibling tool metadata (not part of this codebase)
 entities.json
 mempalace.yaml
