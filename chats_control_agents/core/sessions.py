@@ -163,9 +163,39 @@ def create_session_dir(
 
 
 # ── Session listing ──────────────────────────────────────────────────────
+def _reconcile_meta_liveness(alias: str, meta: dict) -> tuple[dict, bool]:
+    """Lazy-fix：meta 字面声称在线（daemon_pid 非 null）但 PID 已不活时，
+    返回修正过的 meta 副本（daemon_pid / child_pid 清 None、写
+    `last_exit_at="(detected_dead)"`）+ True。
+
+    无需修正时返回原 meta + False。
+
+    daemon 自己注册了 atexit 钩子写这些字段，但被 `taskkill /F`、断电、
+    OOM、Python 解释器崩等情况绕过时，meta 会留死 PID，把"在线"假象
+    带到 dashboard 和命令行 /list 上。本函数负责把字面状态拽回真实。
+
+    **不做** PID 复用检测——daemon 没记自己 create_time，理论上死 daemon
+    的 PID 被 OS 分给别的进程时这里会判活。todo：init_lifecycle 时写
+    `daemon_create_time` 字段，本函数加 create_time 比对。
+    """
+    daemon_pid = meta.get("daemon_pid")
+    if not daemon_pid:
+        return meta, False  # 已经是 null，无事可做
+    if _pid_alive(daemon_pid):
+        return meta, False  # 活着，别动
+    fixed = dict(meta)
+    fixed["daemon_pid"] = None
+    fixed["child_pid"] = None
+    fixed.setdefault("last_exit_at", "(detected_dead)")
+    return fixed, True
+
+
 def list_sessions() -> list[dict]:
     """Scan chat_sessions/ for all aliases. Sorted: online first, then by
-    recency descending."""
+    recency descending.
+
+    顺带做 lazy-fix：扫到 meta 字面声称在线但 PID 不活的会话时，
+    回写 meta 把字段清成 null（见 `_reconcile_meta_liveness`）。"""
     cur = get_current()
     out: list[dict] = []
     for entry in SESSIONS_ROOT.iterdir():
@@ -175,6 +205,12 @@ def list_sessions() -> list[dict]:
         if not ALIAS_RE.match(alias):
             continue
         m = load_meta_for(alias) or {}
+        m, changed = _reconcile_meta_liveness(alias, m)
+        if changed:
+            try:
+                save_meta_for(alias, m)
+            except Exception:
+                pass  # 写盘失败不阻塞列表渲染——下次扫描再尝试
         daemon_pid = m.get("daemon_pid")
         online = bool(daemon_pid) and _pid_alive(daemon_pid)
         out.append({

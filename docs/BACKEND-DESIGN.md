@@ -32,6 +32,10 @@ router 写 `chat_sessions/<alias>/inbox.txt`，web/channel 读
   —— 让 watcher 用 mtime 判新。
 - `meta.json` 必填字段：`alias`、`cwd`、`daemon_pid`、`child_pid`、`created_at`、
   `backend`（新增）。dead 之后追加 `last_exit_at` 并把两个 pid 清成 null。
+- `last_exit_at` 两种来源：(a) daemon 自己 atexit 钩子写的 ISO 时间戳——正常退出；
+  (b) `"(detected_dead)"`——`core.sessions.list_sessions` 扫描时发现 meta 字面声称
+  在线但 PID 已不活时的 lazy-fix 标记（被 `taskkill /F` / OOM / 解释器崩等绕过
+  atexit 时会落这种）。读 meta 的人不需要区分这两种，只关心"有这字段 = 已离线"。
 
 ## daemon 在消息路径上吗？由 backend 决定
 
@@ -217,3 +221,10 @@ backend 再考虑抽到 paths.py 之类的更底层。
   - 用户切 backend 是低频动作，一次设了之后通常会连续用一段时间
   - 复用现有命令面，0 新增 UI 概念
   - dashboard 有空间显式选，所以浏览器路径不走这个文件，避免两条路径互相干扰
+- **2026-06-11**：`list_sessions` 加 lazy-fix——扫到 meta 字面在线但 daemon
+  PID 已不活的会话时，回写 meta 把 daemon_pid/child_pid 清成 null + 写
+  `last_exit_at: "(detected_dead)"`。理由：`taskkill /F` / OOM / 解释器崩等
+  情况会绕过 daemon 的 atexit 钩子，meta 字面留死 PID 误导 dashboard /
+  `/list`。**不**在 `load_meta_for` 里做，避免给底层 read 路径加副作用——
+  只在"全表扫描"路径（list_sessions）顺带做。PID 复用风险未处理（todo：
+  init_lifecycle 时写 daemon_create_time，比对再判活）。
