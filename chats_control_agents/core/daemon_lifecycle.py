@@ -153,7 +153,22 @@ def init_lifecycle(
     )
 
     # 初始 meta 写盘——backend 之后用 update_meta() 增量补字段
-    write_meta(ctx, daemon_pid=os.getpid(), child_pid=None, created_at=_now_iso())
+    # daemon_create_time 给 sessions._reconcile_meta_liveness 做 PID 复用防护：
+    # 如果 daemon 死了一周、OS 把这个 PID 复用给别的进程，比对 create_time
+    # 能识破"假活"
+    daemon_create_time: Optional[float] = None
+    try:
+        import psutil
+        daemon_create_time = psutil.Process(os.getpid()).create_time()
+    except Exception as e:
+        log.warning("psutil create_time for daemon self failed: %s", e)
+    write_meta(
+        ctx,
+        daemon_pid=os.getpid(),
+        daemon_create_time=daemon_create_time,
+        child_pid=None,
+        created_at=_now_iso(),
+    )
     return ctx
 
 

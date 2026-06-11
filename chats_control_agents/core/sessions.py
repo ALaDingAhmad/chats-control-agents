@@ -174,19 +174,44 @@ def _reconcile_meta_liveness(alias: str, meta: dict) -> tuple[dict, bool]:
     OOM、Python 解释器崩等情况绕过时，meta 会留死 PID，把"在线"假象
     带到 dashboard 和命令行 /list 上。本函数负责把字面状态拽回真实。
 
-    **不做** PID 复用检测——daemon 没记自己 create_time，理论上死 daemon
-    的 PID 被 OS 分给别的进程时这里会判活。todo：init_lifecycle 时写
-    `daemon_create_time` 字段，本函数加 create_time 比对。
+    PID 复用防护：daemon 启动时通过 `init_lifecycle` 写
+    `daemon_create_time`（psutil.Process.create_time()）；本函数判活时
+    除了 `_pid_alive` 还会比对 create_time。如果 PID 还在但是 create_time
+    对不上，说明那是 OS 复用后的另一个进程（比如 daemon 死了一周、PID
+    被某 Edge 标签拿去用了）——视同已死，回写清字段。
+
+    向后兼容：老 meta 没有 `daemon_create_time` 字段时退化到只用
+    `_pid_alive`（跟改动前同行为）。
     """
     daemon_pid = meta.get("daemon_pid")
     if not daemon_pid:
         return meta, False  # 已经是 null，无事可做
-    if _pid_alive(daemon_pid):
-        return meta, False  # 活着，别动
+    if not _pid_alive(daemon_pid):
+        # PID 直接不在了，无歧义
+        fixed = dict(meta)
+        fixed["daemon_pid"] = None
+        fixed["child_pid"] = None
+        fixed.setdefault("last_exit_at", "(detected_dead)")
+        return fixed, True
+
+    # PID 活着——但要确认是不是同一个进程
+    logged_ct = meta.get("daemon_create_time")
+    if logged_ct is None:
+        return meta, False  # 老 meta 没记 create_time，没法二次验证；保持兼容
+    try:
+        import psutil
+        actual_ct = psutil.Process(daemon_pid).create_time()
+    except Exception:
+        # psutil 没装 / 进程恰好刚死 / 无权限——保守地认为还活着，
+        # 不冒"清掉真活进程"的风险
+        return meta, False
+    if abs(actual_ct - logged_ct) < 1.0:
+        return meta, False  # 是同一个 daemon，确认在线
+    # PID 复用：现在那个进程不是我们的 daemon
     fixed = dict(meta)
     fixed["daemon_pid"] = None
     fixed["child_pid"] = None
-    fixed.setdefault("last_exit_at", "(detected_dead)")
+    fixed.setdefault("last_exit_at", "(detected_dead_pid_recycled)")
     return fixed, True
 
 

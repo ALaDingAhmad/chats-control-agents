@@ -32,10 +32,16 @@ router 写 `chat_sessions/<alias>/inbox.txt`，web/channel 读
   —— 让 watcher 用 mtime 判新。
 - `meta.json` 必填字段：`alias`、`cwd`、`daemon_pid`、`child_pid`、`created_at`、
   `backend`（新增）。dead 之后追加 `last_exit_at` 并把两个 pid 清成 null。
-- `last_exit_at` 两种来源：(a) daemon 自己 atexit 钩子写的 ISO 时间戳——正常退出；
-  (b) `"(detected_dead)"`——`core.sessions.list_sessions` 扫描时发现 meta 字面声称
-  在线但 PID 已不活时的 lazy-fix 标记（被 `taskkill /F` / OOM / 解释器崩等绕过
-  atexit 时会落这种）。读 meta 的人不需要区分这两种，只关心"有这字段 = 已离线"。
+  从 2026-06-11 起 init_lifecycle 还写 `daemon_create_time`
+  （`psutil.Process.create_time()` 浮点秒），用于 PID 复用防护——老会话没
+  这个字段时 lazy-fix 退化到只看 PID 活性，兼容。
+- `last_exit_at` 三种来源：(a) daemon 自己 atexit 钩子写的 ISO 时间戳——正常退出；
+  (b) `"(detected_dead)"`——`core.sessions.list_sessions` 扫描时发现 meta 字面
+  声称在线但 PID 已不活时的 lazy-fix 标记（被 `taskkill /F` / OOM / 解释器崩等
+  绕过 atexit 时会落这种）；(c) `"(detected_dead_pid_recycled)"`——同 (b)，
+  但是 PID 还在、`psutil.Process.create_time()` 对不上 meta 里记的，说明
+  那是 OS 复用后的另一个进程。读 meta 的人不需要区分这三种，只关心"有这
+  字段 = 已离线"。
 
 ## daemon 在消息路径上吗？由 backend 决定
 
@@ -237,3 +243,10 @@ backend 再考虑抽到 paths.py 之类的更底层。
   `install/install.py --hook`。同时删了过期的 `scripts/restart_all.ps1`
   （路径名还指向 claude-mcp-bridge 老仓库，调用的 `claude_daemon.py` 都
   不存在了），换成 `scripts/start_web_detached.py` + `scripts/stop_web.py`。
+- **2026-06-11**：补 lazy-fix 的 PID 复用防护——`init_lifecycle` 把
+  `daemon_create_time` 写进 meta，`_reconcile_meta_liveness` 判活时除了
+  `_pid_alive` 还比对 `psutil.Process(pid).create_time()`。对不上视同已死，
+  用 `last_exit_at="(detected_dead_pid_recycled)"` 区分两种死法。
+  向后兼容：老 meta 没 `daemon_create_time` 字段时退化到只用
+  `_pid_alive`——避免对 06-11 之前起的会话误判。psutil 没装 / 拿不到时
+  保守不动，不冒"清掉真活进程"的风险。
