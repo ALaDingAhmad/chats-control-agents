@@ -31,6 +31,10 @@ PROJ_CHOICES_FILE = SESSIONS_ROOT / "_pending_proj.json"
 # Queue: web_server's autospawn worker drains this
 AUTOSPAWN_QUEUE_FILE = SESSIONS_ROOT / "_autospawn_queue.jsonl"
 
+# 默认 backend：命令行 /proj 建会话时读这里决定起哪个 daemon。
+# 缺省 claude_code；用户通过 /backend <name> 切换并写进此文件。
+DEFAULT_BACKEND_FILE = SESSIONS_ROOT / "_default_backend.txt"
+
 # Alias = a-zA-Z0-9_-CJK 1-32 chars. Used as a directory name and command arg.
 ALIAS_RE = re.compile(r"^[a-zA-Z0-9_\-一-鿿]{1,32}$")
 

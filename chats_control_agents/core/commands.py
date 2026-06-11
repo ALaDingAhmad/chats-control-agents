@@ -31,12 +31,15 @@ from .proj_choices import (
 )
 from .projects import list_projects
 from .sessions import (
+    KNOWN_BACKENDS,
     create_session_dir,
     get_current,
+    get_default_backend,
     list_sessions,
     load_meta_for,
     save_meta_for,
     set_current,
+    set_default_backend,
 )
 
 
@@ -104,6 +107,8 @@ def handle_command(text: str) -> str:
         if not args:
             return "用法：/rename <new-alias>"
         return _cmd_rename(args[0])
+    if cmd == "backend":
+        return _cmd_backend(args)
     return f"未知命令：/{cmd}\n\n" + _help_text()
 
 
@@ -119,6 +124,7 @@ def _help_text() -> str:
         "/new — 同 /proj（列项目，回 0 开空会话，回数字开/切项目）\n"
         "/end 「alias」— 结束会话（60s 内再发一次确认）\n"
         "/rename 「new」— 重命名当前会话\n"
+        "/backend — 看/切默认 AI 后端（用于之后新建的会话）\n"
         "/help — 显示本帮助\n"
         "//xxx — 把 /xxx 透传给 claude（如 //handoff, //recall）"
     )
@@ -226,8 +232,9 @@ def _cmd_pick_proj(n: int) -> str:
         from .sessions import make_alias_for_cwd
         home_cwd = str(Path.home())
         alias = make_alias_for_cwd(home_cwd)
-        # 微信/命令行入口建会话只起 claude_code；要 hermes_acp 走 dashboard
-        create_session_dir(alias, home_cwd, backend="claude_code")
+        # 默认 backend 由 /backend 命令调整（缺省 claude_code），所有命令行
+        # 入口新建会话都用这个值——避免每个建会话点散在多处硬编码
+        create_session_dir(alias, home_cwd, backend=get_default_backend())
         try:
             set_current(alias)
         except Exception:
@@ -280,7 +287,7 @@ def _cmd_pick_proj(n: int) -> str:
         n_suffix += 1
         alias = f"{base}_{n_suffix}"
 
-    create_session_dir(alias, p["abs_path"], backend="claude_code")
+    create_session_dir(alias, p["abs_path"], backend=get_default_backend())
     try:
         set_current(alias)
     except Exception:
@@ -359,3 +366,32 @@ def _cmd_rename(new_alias: str) -> str:
     save_meta_for(new_alias, m)
     set_current(new_alias)
     return f"已重命名 {cur!r} → {new_alias!r}。"
+
+
+# ── /backend ─────────────────────────────────────────────────────────────
+def _cmd_backend(args: list[str]) -> str:
+    """看/切默认 backend——只影响之后新建的会话，已有会话不变。
+
+    无参 → 显示当前默认 + 可选项
+    有参 → 切换并落盘 _default_backend.txt
+    """
+    cur = get_default_backend()
+    if not args:
+        lines = [f"当前默认 backend：{cur}", "可选："]
+        for name in KNOWN_BACKENDS:
+            mark = "·" if name == cur else " "
+            lines.append(f" {mark} {name}")
+        lines.append("用 /backend <名字> 切换。只影响之后新建的会话。")
+        return "\n".join(lines)
+
+    target = args[0].strip().lower()
+    if target == cur:
+        return f"默认 backend 已经是 {target}，没改动。"
+    try:
+        set_default_backend(target)
+    except ValueError as e:
+        return f"切换失败：{e}\n可选：{', '.join(KNOWN_BACKENDS)}"
+    return (
+        f"已切默认 backend：{cur} → {target}。\n"
+        f"之后用 /new 或 /proj 新建的会话都会用 {target}。"
+    )

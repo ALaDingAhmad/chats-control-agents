@@ -20,6 +20,7 @@
 - **MCP 服务器名 = `cca-msg`**（不是 `web-chat`）。Skill 触发器名 = `chats-loop`（不是 `web-relay`）。`~/.claude.json` 里 `mcpServers.cca-msg.args[0]` 必须指向本仓库的 `chats_control_agents/backends/claude_code/mcp_bridge.py`。改路径前先备份 `~/.claude.json`。
 - **全局单选中 alias**：`chat_sessions/_current.txt` 一个文件，所有 weixin/web 入站消息都路由到它。多用户路由要按 `peer_id` 分流，目前没做。
 - **daemon spawn child claude 的 cwd 不是 agent-bridge 自己**，而是 `D:/aiproject/claude-code-account-switch`（ccs 工具目录），这样 child claude 用 CCS 当前选中的账号。不要假定 child claude 跟 daemon 在同一目录。
+- **现在有两个 backend：`claude_code` 和 `hermes_acp`**。`meta.json.backend` 字段决定起哪个 daemon（`core.spawn._resolve_daemon_module`）。命令行入口（微信 `/proj` / `/new`）读 `chat_sessions/_default_backend.txt`（缺省 `claude_code`），`/backend <name>` 命令改它；dashboard 建会话用 modal 下拉选，不读此文件。**新加 backend 要同步 3 处**：`core.sessions.KNOWN_BACKENDS`、`core.spawn._BACKEND_DAEMON_MODULES`、`web.spawn_helpers._KNOWN_BACKENDS`。详见 `docs/BACKEND-DESIGN.md`。
 
 ## 已知坑（容易再踩）
 

@@ -22,6 +22,7 @@ import re as _re
 from .paths import (
     ALIAS_RE,
     CURRENT_FILE,
+    DEFAULT_BACKEND_FILE,
     LEGACY_DEFAULT_ALIAS,
     SESSIONS_ROOT,
     history_path,
@@ -31,6 +32,11 @@ from .paths import (
     session_dir,
 )
 from .pid_track import _pid_alive
+
+
+# 已知 backend 集合（跟 core.spawn._BACKEND_DAEMON_MODULES 一致）
+KNOWN_BACKENDS = ("claude_code", "hermes_acp")
+_BACKEND_NAME_RE = _re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 
 
 # ── Current selection (global, single-user) ──────────────────────────────
@@ -85,6 +91,27 @@ def set_current(alias: str) -> None:
         raise ValueError(f"invalid alias: {alias!r}")
     session_dir(alias).mkdir(parents=True, exist_ok=True)
     CURRENT_FILE.write_text(alias, encoding="utf-8")
+
+
+# ── Default backend (sticky per install, read by /proj when creating sessions) ──
+def get_default_backend() -> str:
+    """读默认 backend；文件不存在或无效时回 claude_code。"""
+    if DEFAULT_BACKEND_FILE.exists():
+        try:
+            val = DEFAULT_BACKEND_FILE.read_text(encoding="utf-8").strip()
+            if val in KNOWN_BACKENDS:
+                return val
+        except Exception:
+            pass
+    return "claude_code"
+
+
+def set_default_backend(name: str) -> None:
+    """切默认 backend。校验过 KNOWN_BACKENDS，外部仍需要兜底 ValueError。"""
+    if not _BACKEND_NAME_RE.match(name) or name not in KNOWN_BACKENDS:
+        raise ValueError(f"unknown backend: {name!r}")
+    DEFAULT_BACKEND_FILE.parent.mkdir(parents=True, exist_ok=True)
+    DEFAULT_BACKEND_FILE.write_text(name, encoding="utf-8")
 
 
 # ── Meta access ──────────────────────────────────────────────────────────

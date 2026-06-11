@@ -46,6 +46,11 @@ class RouteOutcome:
    `/proj` 选号窗口内的纯数字返回 True。命中就跑 `commands.handle_command`
    返回 reply，不动后端。
 
+   命令里有一类"**元命令**"——不直接操作当前会话，而是改"之后建会话时的
+   参数"。目前只有 `/backend [<name>]`：看/切默认 backend，落
+   `chat_sessions/_default_backend.txt`，之后 `/proj N` / `/proj 0` 建会话
+   时读它。详见 `BACKEND-DESIGN.md` "默认 backend 契约"段。
+
 2. **passthrough (`//xxx`)** — `commands.strip_passthrough_prefix` 去掉一层
    `/`，让 agent 看到的是 `/xxx`，剩下的文本走普通消息路径。
 
