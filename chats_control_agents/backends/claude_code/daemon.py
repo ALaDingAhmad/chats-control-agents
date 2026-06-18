@@ -192,34 +192,61 @@ def main() -> int:
     trigger_sent = False
     last_output_at = time.time()
 
+    # winpty PtyProcess.read() blocks when there's no output, so we use
+    # a background thread + queue to get non-blocking reads with timeout.
+    import queue
+    import threading
+
+    read_q: queue.Queue[str | None] = queue.Queue()
+
+    def _pty_reader():
+        try:
+            while proc.isalive():
+                try:
+                    chunk = proc.read(1024)
+                    if chunk:
+                        read_q.put(_decode(chunk))
+                    else:
+                        time.sleep(0.05)
+                except EOFError:
+                    break
+                except Exception:
+                    if not proc.isalive():
+                        break
+                    time.sleep(0.1)
+        finally:
+            read_q.put(None)
+
+    reader_thread = threading.Thread(target=_pty_reader, daemon=True)
+    reader_thread.start()
+
     while proc.isalive():
         try:
-            chunk = proc.read(1024)
-        except Exception as e:
-            log.warning("read failed: %s (alive=%s)", e, proc.isalive())
-            if not proc.isalive():
-                break
-            time.sleep(0.1)
-            continue
-
-        if not chunk:
-            # No output — check if settled long enough to send trigger
+            text = read_q.get(timeout=0.5)
+        except queue.Empty:
+            # No output for 0.5s — check settle
             if not trigger_sent and (time.time() - last_output_at >= READY_SETTLE_SECS):
-                elapsed = time.time() - last_output_at
-                log.info("TUI settled (%.1fs silence), sending trigger", elapsed)
+                log.info("TUI settled (%.1fs silence), sending trigger", time.time() - last_output_at)
                 _write_outbox_notice("正在激活 chats-loop…")
                 try:
+                    # Type the command, wait for autocomplete tooltip, then
+                    # press Enter again to submit. Newer TUI versions show a
+                    # skill description popup on first Enter; the second
+                    # Enter actually submits the command.
                     proc.write(TRIGGER_COMMAND + "\r")
+                    time.sleep(1.5)
+                    proc.write("\r")
                     trigger_sent = True
-                    log.info("sent trigger: %r", TRIGGER_COMMAND)
+                    log.info("sent trigger: %r (with extra Enter)", TRIGGER_COMMAND)
                 except Exception as e:
                     log.warning("trigger write failed: %s", e)
                     _write_outbox_notice(f"trigger 发送失败: {e}", icon="❌")
                 last_output_at = time.time()
-            time.sleep(0.1)
             continue
 
-        text = _decode(chunk)
+        if text is None:
+            break
+
         pty_log.write(text)
         pty_log.flush()
         buffer = (buffer + text)[-4096:]
