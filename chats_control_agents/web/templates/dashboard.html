@@ -141,11 +141,12 @@
       </div>
     </div>
 
-    <!-- Hermes (future) -->
-    <div class="card disabled" id="card-hermes">
-      <h2><span class="icon">⚡</span>Hermes <span class="soon">即将支持</span></h2>
-      <div class="body">基于 API 的轻量后端，用于无需本地 TUI 的场景。</div>
-      <div class="kv"><span>状态</span><b>未启用</b></div>
+    <!-- Hermes ACP -->
+    <div class="card" id="card-hermes">
+      <h2><span class="icon">⚡</span>Hermes ACP <span class="badge dim" id="hermes-state">--</span></h2>
+      <div class="body">基于 Anthropic API 的轻量后端，通过 ACP 协议直连，无需本地 TUI。</div>
+      <div class="kv"><span>已起 daemon</span><b id="hermes-daemons">--</b></div>
+      <div class="kv"><span>已登记会话</span><b id="hermes-sessions">--</b></div>
     </div>
     </div>
    </div>
@@ -159,6 +160,7 @@
       <div class="body" id="wx-desc">通过 iLink Bot 接入个人微信，对绑定微信号说话即可触达后端。</div>
       <div class="kv"><span>账号</span><b id="wx-account">--</b></div>
       <div class="kv"><span>长轮询</span><b id="wx-polling">--</b></div>
+      <div class="kv"><span>最后消息</span><b id="wx-last-msg">--</b></div>
       <div class="actions">
         <a class="btn" href="/settings#weixin">管理微信</a>
       </div>
@@ -197,20 +199,63 @@ async function refresh() {
     } else {
       claudeMcp.textContent = 'MCP 未注册'; claudeMcp.className = 'badge off';
     }
+    const cc = d.claude || {};
     document.getElementById('claude-daemons').textContent =
-      `${d.sessions_online} / ${d.sessions_total}`;
-    document.getElementById('claude-sessions').textContent = d.sessions_total;
+      `${cc.sessions_online ?? 0} / ${cc.sessions_total ?? 0}`;
+    document.getElementById('claude-sessions').textContent = cc.sessions_total ?? 0;
+
+    // hermes acp card
+    const hm = d.hermes || {};
+    const hermesBadge = document.getElementById('hermes-state');
+    if ((hm.sessions_online ?? 0) > 0) {
+      hermesBadge.textContent = `${hm.sessions_online} 在线`; hermesBadge.className = 'badge on';
+    } else if ((hm.sessions_total ?? 0) > 0) {
+      hermesBadge.textContent = '离线'; hermesBadge.className = 'badge dim';
+    } else {
+      hermesBadge.textContent = '无会话'; hermesBadge.className = 'badge dim';
+    }
+    document.getElementById('hermes-daemons').textContent =
+      `${hm.sessions_online ?? 0} / ${hm.sessions_total ?? 0}`;
+    document.getElementById('hermes-sessions').textContent = hm.sessions_total ?? 0;
 
     // weixin card
     const wxBadge = document.getElementById('wx-state');
-    if (d.weixin.connected) {
-      wxBadge.textContent = '已连接'; wxBadge.className = 'badge on';
-    } else {
+    const wxErr = d.weixin.last_error;
+    const wxLastMsg = d.weixin.last_msg_at;
+    const wxPollOk = d.weixin.last_poll_ok_at;
+    if (!d.weixin.connected) {
       wxBadge.textContent = '未连接'; wxBadge.className = 'badge off';
+    } else if (!d.weixin.running) {
+      wxBadge.textContent = '已断开'; wxBadge.className = 'badge off';
+    } else if (wxErr) {
+      wxBadge.textContent = '连接异常'; wxBadge.className = 'badge off';
+    } else if (wxPollOk && !wxLastMsg) {
+      wxBadge.textContent = '轮询中（未收到消息）'; wxBadge.className = 'badge dim';
+    } else if (wxLastMsg) {
+      wxBadge.textContent = '在线'; wxBadge.className = 'badge on';
+    } else {
+      wxBadge.textContent = '等待首次轮询'; wxBadge.className = 'badge dim';
     }
     document.getElementById('wx-account').textContent = d.weixin.account_id || '--';
-    document.getElementById('wx-polling').textContent =
-      d.weixin.connected ? (d.weixin.running ? '运行中' : '已停止') : '--';
+    // polling status detail
+    let pollText = '--';
+    if (d.weixin.connected) {
+      if (!d.weixin.running) pollText = '已停止（token 过期或连到别处）';
+      else if (wxErr) pollText = wxErr;
+      else pollText = '运行中';
+    }
+    document.getElementById('wx-polling').textContent = pollText;
+    // last message time
+    const wxLastMsgEl = document.getElementById('wx-last-msg');
+    if (wxLastMsg) {
+      const ago = Math.round((Date.now()/1000 - wxLastMsg) / 60);
+      if (ago < 1) wxLastMsgEl.textContent = '刚刚';
+      else if (ago < 60) wxLastMsgEl.textContent = `${ago} 分钟前`;
+      else if (ago < 1440) wxLastMsgEl.textContent = `${Math.round(ago/60)} 小时前`;
+      else wxLastMsgEl.textContent = `${Math.round(ago/1440)} 天前`;
+    } else {
+      wxLastMsgEl.textContent = d.weixin.running ? '本次启动后未收到' : '--';
+    }
   } catch (e) {
     console.error('dashboard refresh failed', e);
   }

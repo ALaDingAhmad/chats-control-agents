@@ -33,6 +33,9 @@ _wx: dict = {
     "tasks": [],                   # asyncio.Task list (longpoll, outbox_watch, qr_login, autospawn)
     "outbox_last_pushed": "",      # fingerprint of last outbox we forwarded (legacy single-session)
     "running": False,              # whether the longpoll loop is alive
+    "last_msg_at": None,           # epoch of most recent inbound message
+    "last_poll_ok_at": None,       # epoch of most recent successful getupdates (ret=0)
+    "last_error": None,            # most recent longpoll error string
     "alias_peer": {},              # alias → most-recent WeChat peer that wrote into it
 }
 
@@ -85,12 +88,38 @@ def start_runtime_tasks(account: dict) -> None:
     _wx["tasks"].extend([t1, t2])
 
 
+async def _probe_token(account: dict) -> bool:
+    """Lightweight token validity check via getconfig. Returns True if valid."""
+    try:
+        async with wx._build_session() as s:
+            r = await wx.get_config(
+                s,
+                base_url=account["baseurl"],
+                token=account["bot_token"],
+                user_id=account.get("ilink_user_id", ""),
+            )
+        code = r.get("errcode", r.get("ret", 0))
+        if code in (-14, -2):
+            log.warning("weixin: token probe failed (errcode=%s: %s)", code, r.get("errmsg", ""))
+            return False
+        return True
+    except Exception as e:
+        log.warning("weixin: token probe error: %s", e)
+        return False
+
+
 async def bootstrap_weixin():
     """On server startup, resume long-poll if we have a stored account."""
     acct = wxs.load_account()
     if acct and acct.get("bot_token"):
-        log.info("weixin: resuming saved account %s", acct.get("ilink_bot_id"))
-        start_runtime_tasks(acct)
+        log.info("weixin: probing saved account %s", acct.get("ilink_bot_id"))
+        if await _probe_token(acct):
+            log.info("weixin: token valid, starting runtime")
+            start_runtime_tasks(acct)
+        else:
+            log.warning("weixin: token invalid (session timeout), skipping longpoll")
+            _wx["running"] = False
+            _wx["last_error"] = "token 已失效（session timeout），需重新扫码"
 
 
 # ── QR login loop ───────────────────────────────────────────────────────
@@ -167,14 +196,27 @@ async def _inbound_longpoll(account: dict):
     sync_buf advances each round so we don't re-receive the same messages.
     Records the latest peer's context_token so replies route correctly.
     """
+    import time as _time
     token = account["bot_token"]
     base_url = account["baseurl"]
     sync_buf = ""
     backoff = 2
+    _TOKEN_PROBE_INTERVAL = 300  # 每 5 分钟探测一次 token 有效性
+    _last_probe = _time.time()
     log.info("weixin longpoll starting, base=%s", base_url)
     try:
         async with wx._build_session() as session:
             while _wx.get("running"):
+                # 定期 token 探测：长时间没收到消息时检查 token 是否还有效
+                now = _time.time()
+                if (now - _last_probe >= _TOKEN_PROBE_INTERVAL
+                        and _wx.get("last_msg_at") is None):
+                    _last_probe = now
+                    if not await _probe_token(account):
+                        log.warning("weixin: token expired during longpoll, stopping")
+                        _wx["running"] = False
+                        _wx["last_error"] = "token 已失效（session timeout），需重新扫码"
+                        return
                 try:
                     resp = await wx.get_updates(
                         session, base_url=base_url, token=token, sync_buf=sync_buf,
@@ -182,15 +224,18 @@ async def _inbound_longpoll(account: dict):
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
+                    _wx["last_error"] = str(e)
                     log.warning("longpoll error: %s, backoff=%ds", e, backoff)
                     await asyncio.sleep(backoff)
                     backoff = min(backoff * 2, 60)
                     continue
                 backoff = 2
+                _wx["last_error"] = None
 
                 ret = resp.get("ret")
                 if ret not in (0, None):
                     errmsg = resp.get("errmsg") or ""
+                    _wx["last_error"] = f"ret={ret} {errmsg}"
                     log.warning("longpoll ret=%s errmsg=%s", ret, errmsg)
                     if ret in (-14, -2):
                         log.warning("session stale, stopping longpoll")
@@ -198,6 +243,9 @@ async def _inbound_longpoll(account: dict):
                         return
                     await asyncio.sleep(2)
                     continue
+
+                import time as _time
+                _wx["last_poll_ok_at"] = _time.time()
 
                 sync_buf = str(resp.get("get_updates_buf") or sync_buf)
 
@@ -208,6 +256,7 @@ async def _inbound_longpoll(account: dict):
                         continue
                     sender, text, ctx_tok = parsed
                     _wx["last_peer_id"] = sender
+                    _wx["last_msg_at"] = _time.time()
                     if ctx_tok:
                         wxs.set_context_token(sender, ctx_tok)
                     log.info("weixin inbound from=%s chars=%d", sender[:8], len(text))

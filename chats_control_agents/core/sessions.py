@@ -247,6 +247,7 @@ def list_sessions() -> list[dict]:
             "last_exit_at": m.get("last_exit_at"),
             "last_active": _last_active(alias),
             "current": alias == cur,
+            "backend": m.get("backend", "claude_code"),
         })
     out.sort(key=lambda s: (not s["online"], -(s["last_active"] or 0)))
     return out

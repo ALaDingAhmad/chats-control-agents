@@ -89,6 +89,12 @@ async def dashboard_status(request):
     acct = wxs.load_account()
     wx_state = get_wx_state()
 
+    # per-backend counts
+    claude_total = sum(1 for s in sessions if s.get("backend", "claude_code") == "claude_code")
+    claude_online = sum(1 for s in sessions if s.get("backend", "claude_code") == "claude_code" and s.get("online"))
+    hermes_total = sum(1 for s in sessions if s.get("backend") == "hermes_acp")
+    hermes_online = sum(1 for s in sessions if s.get("backend") == "hermes_acp" and s.get("online"))
+
     # MCP registration check: does ~/.claude.json have a cca-msg entry
     # pointing at OUR mcp_bridge.py?
     mcp_registered = False
@@ -113,11 +119,20 @@ async def dashboard_status(request):
         "web_port": cfg.get_web_port(),
         "claude": {
             "mcp_registered": mcp_registered,
+            "sessions_total": claude_total,
+            "sessions_online": claude_online,
+        },
+        "hermes": {
+            "sessions_total": hermes_total,
+            "sessions_online": hermes_online,
         },
         "weixin": {
             "connected": bool(acct and acct.get("bot_token")),
             "running": wx_state.get("running", False),
             "account_id": (acct or {}).get("ilink_bot_id"),
+            "last_msg_at": wx_state.get("last_msg_at"),
+            "last_poll_ok_at": wx_state.get("last_poll_ok_at"),
+            "last_error": wx_state.get("last_error"),
         },
         "workspace_roots": [str(r) for r in cfg.get_workspace_roots()],
     })

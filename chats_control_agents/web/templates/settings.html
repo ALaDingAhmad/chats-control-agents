@@ -325,13 +325,21 @@ async function refreshWeixin() {
   try {
     const r = await fetch('/weixin/status');
     const d = await r.json();
-    if (d.connected) {
+    if (d.connected && d.running) {
       wxStatus.className = 'status-row connected';
-      wxStatus.textContent = `已连接（${d.account_id || '未知账号'}） · 长轮询 ${d.running ? '运行中' : '已停止'}`;
+      wxStatus.textContent = `已连接（${d.account_id || '未知账号'}） · 长轮询 运行中`;
       wxStart.style.display = 'none';
       wxStop.style.display = 'inline-block';
       qrBox.innerHTML = '';
       wxMsg.textContent = '';
+    } else if (d.connected && !d.running) {
+      wxStatus.className = 'status-row';
+      const reason = d.last_error || 'token 过期或被其他服务抢占';
+      wxStatus.textContent = `已断开（${d.account_id || '未知账号'}） · ${reason}`;
+      wxStart.style.display = 'inline-block';
+      wxStop.style.display = 'inline-block';
+      qrBox.innerHTML = '';
+      wxMsg.textContent = '需要重新扫码连接';
     } else {
       wxStatus.className = 'status-row';
       wxStatus.textContent = '未连接';

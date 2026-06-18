@@ -39,6 +39,7 @@ async def weixin_status(request):
         "connected": connected,
         "account_id": (acct or {}).get("ilink_bot_id"),
         "running": _wx.get("running", False),
+        "last_error": _wx.get("last_error"),
         "qr_status": _wx.get("qr_status"),
         "qr_error": _wx.get("qr_error"),
         "qrcode_img_content": _wx.get("qrcode_img_content"),
@@ -51,7 +52,10 @@ async def weixin_qr_start(request):
     actual status-polling happens in the background. Frontend polls
     /weixin/status to see progress."""
     _wx = get_wx_state()
-    cancel_tasks_named("qr_login")
+    cancel_tasks_named("qr_login", "longpoll", "outbox_watch")
+    _wx["running"] = False
+    _wx["last_error"] = None
+    wxs.clear_account()
     _wx["qr_status"] = "starting"
     _wx["qr_error"] = None
     try:

@@ -49,6 +49,7 @@ const qrEl     = document.getElementById('qr-container');
 const hintEl   = document.getElementById('hint');
 const metaEl   = document.getElementById('meta');
 let qrObj = null;
+let qrCurrentUrl = null;
 let pollTimer = null;
 
 function setStatus(text, cls) {
@@ -57,20 +58,40 @@ function setStatus(text, cls) {
 }
 
 function renderQR(url) {
+  if (qrCurrentUrl === url && qrObj) return;
   qrEl.innerHTML = '';
   qrObj = new QRCode(qrEl, { text: url, width: 240, height: 240,
                               correctLevel: QRCode.CorrectLevel.M });
+  qrCurrentUrl = url;
+}
+
+function clearQR() {
+  qrEl.innerHTML = '';
+  qrObj = null;
+  qrCurrentUrl = null;
+}
+
+function isTokenExpired(d) {
+  if (!d.last_error) return false;
+  return /失效|过期|timeout|expired/i.test(d.last_error);
 }
 
 async function refresh() {
   const r = await fetch('/weixin/status');
   const d = await r.json();
-  if (d.connected) {
+  if (d.connected && !isTokenExpired(d)) {
     setStatus(`已连接（${d.account_id || '未知账号'}）`, 'connected');
     btnStart.style.display = 'none';
     btnStop.style.display = 'inline-block';
-    qrEl.innerHTML = '';
+    clearQR();
     hintEl.textContent = `长轮询: ${d.running ? '运行中' : '未运行'}`;
+    metaEl.textContent = '';
+  } else if (d.connected && isTokenExpired(d)) {
+    setStatus(`登录已过期（${d.account_id || ''}），请重新扫码`, 'error');
+    btnStart.style.display = 'inline-block';
+    btnStop.style.display = 'inline-block';
+    clearQR();
+    hintEl.textContent = '点击"开始扫码登录"获取新二维码，或先"断开账号"清除旧凭据';
     metaEl.textContent = '';
   } else {
     setStatus('未连接');
@@ -84,11 +105,11 @@ async function refresh() {
       hintEl.textContent = '已扫码，请在微信里确认...';
     } else if (d.qr_status === 'expired') {
       hintEl.textContent = '二维码已过期，请重新点击"开始扫码"';
-      qrEl.innerHTML = '';
+      clearQR();
     } else if (d.qr_status === 'error') {
       setStatus('登录错误：' + (d.qr_error || '未知'), 'error');
     } else {
-      qrEl.innerHTML = '';
+      clearQR();
       hintEl.textContent = '';
       metaEl.textContent = '';
     }
