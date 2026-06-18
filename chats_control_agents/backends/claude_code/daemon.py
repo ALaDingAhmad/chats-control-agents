@@ -102,8 +102,10 @@ TRIGGER_COMMAND = "/chats-loop"
 # be spelled without the space ("Welcomeback") to match the rendered
 # text. The check site collapses adjacent matches in the stripped buffer.
 READY_MARKERS = [
-    "Welcomeback",     # only shown on the main chat screen
-    "Tipsforgetting",  # "Tips for getting started" panel of the welcome card
+    "Welcomeback",     # older TUI versions show this on the main screen
+    "Tipsforgetting",  # "Tips for getting started" panel (older versions)
+    "ClaudeCodev",     # v2.1+ shows "Claude Code vX.Y.Z" banner (not in trust dialog)
+    'Try"',            # v2.1+ shows 'Try "..."' suggestion prompt
 ]
 # Max seconds to wait for TUI ready before bailing
 READY_TIMEOUT = 30
