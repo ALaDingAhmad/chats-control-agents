@@ -91,6 +91,12 @@ TRIGGER_COMMAND = "/chats-loop"
 # unnecessarily. Trust-folder dialog resets this timer.
 READY_SETTLE_SECS = 3
 
+# Content markers that indicate the TUI main screen has fully loaded and
+# the input box is ready to accept commands. We scan the ANSI-stripped
+# buffer for these; only start the settle timer once at least one is seen.
+# These appear in the bottom status bar / suggestion area of the TUI.
+_TUI_LOADED_MARKERS = ("effort", "bypass", "Try")
+
 # claude_code 历史默认 spawn cwd：ccs 工具目录，让 child claude 用 CCS 当前
 # 选中的账号（见 CLAUDE.md "daemon spawn child claude 的 cwd 不是 agent-bridge"）。
 _HISTORICAL_CWD = ROOT.parent / "claude-code-account-switch"
@@ -190,6 +196,7 @@ def main() -> int:
     buffer = ""
     trust_dismissed = False
     trigger_sent = False
+    tui_loaded = False
     last_output_at = time.time()
 
     # winpty PtyProcess.read() blocks when there's no output, so we use
@@ -224,20 +231,17 @@ def main() -> int:
         try:
             text = read_q.get(timeout=0.5)
         except queue.Empty:
-            # No output for 0.5s — check settle
-            if not trigger_sent and (time.time() - last_output_at >= READY_SETTLE_SECS):
+            # No output for 0.5s — check settle.
+            # Only send trigger after TUI main screen is confirmed loaded
+            # (we saw a content marker like "effort" / "bypass" / "Try")
+            # AND output has settled for READY_SETTLE_SECS.
+            if not trigger_sent and tui_loaded and (time.time() - last_output_at >= READY_SETTLE_SECS):
                 log.info("TUI settled (%.1fs silence), sending trigger", time.time() - last_output_at)
                 _write_outbox_notice("正在激活 chats-loop…")
                 try:
-                    # Type the command, wait for autocomplete tooltip, then
-                    # press Enter again to submit. Newer TUI versions show a
-                    # skill description popup on first Enter; the second
-                    # Enter actually submits the command.
                     proc.write(TRIGGER_COMMAND + "\r")
-                    time.sleep(1.5)
-                    proc.write("\r")
                     trigger_sent = True
-                    log.info("sent trigger: %r (with extra Enter)", TRIGGER_COMMAND)
+                    log.info("sent trigger: %r", TRIGGER_COMMAND)
                 except Exception as e:
                     log.warning("trigger write failed: %s", e)
                     _write_outbox_notice(f"trigger 发送失败: {e}", icon="❌")
@@ -252,6 +256,12 @@ def main() -> int:
         buffer = (buffer + text)[-4096:]
         last_output_at = time.time()
         scan = _ansi_blind(buffer)
+
+        # Detect TUI main screen loaded (input box ready for commands)
+        if not tui_loaded and any(m in scan for m in _TUI_LOADED_MARKERS):
+            tui_loaded = True
+            log.info("TUI main screen loaded (saw content marker)")
+            _write_outbox_notice("TUI 已加载，等待输入就绪…")
 
         # Auto-dismiss trust-folder dialog
         if not trust_dismissed and "trustthisfolder" in scan:
@@ -275,7 +285,6 @@ def main() -> int:
     if not proc.isalive():
         log.error("claude.exe died during startup")
         _write_outbox_notice("Claude 进程在启动阶段退出", icon="❌")
-        _cleanup()
         return 1
 
     # Phase 4: drain loop with rate-limit watchdog.
@@ -401,7 +410,6 @@ def main() -> int:
 
     log.info("claude process exited")
     print("[daemon] claude exited")
-    _cleanup()
     return 0
 
 
