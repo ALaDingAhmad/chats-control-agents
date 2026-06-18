@@ -12,7 +12,7 @@ from .paths import CONFIG_FILE
 
 
 DEFAULT_CONFIG: dict = {
-    "workspace_roots": ["D:/aiproject", "F:/wslshare"],
+    "workspace_roots": [],
     "web_port": 8765,
 }
 

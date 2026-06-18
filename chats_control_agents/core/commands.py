@@ -170,7 +170,7 @@ def _cmd_proj(args: list[str]) -> str:
     if not roots:
         return ("没有可用的工作空间。\n"
                 "在 config.json 加 workspace_roots，比如：\n"
-                '{"workspace_roots": ["D:/aiproject", "F:/wslshare"]}')
+                '{"workspace_roots": ["/path/to/your/projects"]}')
     projects = list_projects()
     if not projects:
         return f"工作空间 {', '.join(str(r) for r in roots)} 下没有项目目录。"
