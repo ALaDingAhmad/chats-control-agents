@@ -85,32 +85,11 @@ CLAUDE_BIN = _find_claude_bin()
 # imperative phrases like "启动 chats-loop" as "the user wants me to
 # create a chats-loop application", which is what kept happening before.
 TRIGGER_COMMAND = "/chats-loop"
-# Heuristics for "TUI is ready" — any of these substrings appearing in PTY
-# output after spawn means we can safely send the trigger.
-#
-# CRITICAL: every marker here must appear ONLY on the post-init main screen,
-# never during pre-init dialogs (e.g. "Do you trust this folder?", login
-# prompts). The previous list included generic box-drawing/prompt chars
-# (│ > ❯) that fired on the trust dialog, so the trigger was typed into
-# that dialog instead of the chat input — \r selected option 1 ("yes")
-# and the slash command was silently discarded, leaving chats-loop never
-# activated and inbox messages never picked up.
-#
-# IMPORTANT: markers are matched against the ANSI-blind buffer (see
-# `_ansi_blind` above). Ink replaces spaces with `\x1b[1C` cursor-right
-# escapes, which strip to nothing — so a marker like "Welcome back" must
-# be spelled without the space ("Welcomeback") to match the rendered
-# text. The check site collapses adjacent matches in the stripped buffer.
-READY_MARKERS = [
-    "Welcomeback",     # older TUI versions show this on the main screen
-    "Tipsforgetting",  # "Tips for getting started" panel (older versions)
-    "ClaudeCodev",     # v2.1+ shows "Claude Code vX.Y.Z" banner (not in trust dialog)
-    'Try"',            # v2.1+ shows 'Try "..."' suggestion prompt
-]
-# Max seconds to wait for TUI ready before bailing
-READY_TIMEOUT = 30
-# How long after sending trigger before we consider it "successfully entered"
-POST_TRIGGER_SETTLE = 6
+# How many seconds of no new PTY output before we consider TUI settled
+# and send the trigger command. Must be long enough that the TUI finishes
+# rendering its welcome screen, but short enough that users don't wait
+# unnecessarily. Trust-folder dialog resets this timer.
+READY_SETTLE_SECS = 3
 
 # claude_code 历史默认 spawn cwd：ccs 工具目录，让 child claude 用 CCS 当前
 # 选中的账号（见 CLAUDE.md "daemon spawn child claude 的 cwd 不是 agent-bridge"）。
@@ -142,7 +121,7 @@ def main() -> int:
     # 初始化生命周期：日志 / session_dir / 初始 meta（含 backend=claude_code）
     ctx = lc.init_lifecycle(alias=ALIAS, cwd=spawn_cwd, backend="claude_code")
     log = ctx.log
-    log.info("claude=%s trigger='%s' ready_timeout=%ds", CLAUDE_BIN, TRIGGER_COMMAND, READY_TIMEOUT)
+    log.info("claude=%s trigger='%s' settle=%ds", CLAUDE_BIN, TRIGGER_COMMAND, READY_SETTLE_SECS)
     print(f"[daemon] alias: {ALIAS}")
     print(f"[daemon] spawning {CLAUDE_BIN}")
     print(f"[daemon] session dir: {ctx.session_dir}")
@@ -200,126 +179,77 @@ def main() -> int:
 
     lc.install_cleanup(ctx, on_exit=_on_exit)
 
-    # 下面保留同名 SESSION_DIR / PTY_LOG_PATH 别名，避免改动后续 TUI 逻辑
     SESSION_DIR = ctx.session_dir
-    PTY_LOG_PATH = pty_log_path
 
-    # Phase 1: wait for TUI to be "ready"
+    # ── Startup loop: read PTY → handle trust dialog → wait for output to
+    # settle → send trigger → wait for "loop active" → enter drain loop.
     #
-    # First-launch in a fresh cwd blocks on the "Do you trust this folder?"
-    # dialog (default-selected = "1. Yes"). Detect it and press Enter so the
-    # TUI proceeds to the main welcome screen where READY_MARKERS will fire.
-    # Without this, the daemon read() blocks forever on an unanswered dialog
-    # and the 30s timeout never even gets checked.
-    print("[daemon] waiting for TUI to load...")
+    # No timeout exits. As long as claude.exe is alive and producing output,
+    # we keep going and push status to outbox so the user sees what's happening.
+    print("[daemon] reading PTY output...")
     buffer = ""
-    start = time.time()
-    ready = False
     trust_dismissed = False
-    while time.time() - start < READY_TIMEOUT:
+    trigger_sent = False
+    last_output_at = time.time()
+
+    while proc.isalive():
         try:
             chunk = proc.read(1024)
         except Exception as e:
-            # winpty raises on closed pty
-            log.warning("read failed during ready wait: %s (alive=%s)", e, proc.isalive())
+            log.warning("read failed: %s (alive=%s)", e, proc.isalive())
             if not proc.isalive():
                 break
             time.sleep(0.1)
             continue
+
         if not chunk:
-            time.sleep(0.05)
+            # No output — check if settled long enough to send trigger
+            if not trigger_sent and (time.time() - last_output_at >= READY_SETTLE_SECS):
+                elapsed = time.time() - last_output_at
+                log.info("TUI settled (%.1fs silence), sending trigger", elapsed)
+                _write_outbox_notice("正在激活 chats-loop…")
+                try:
+                    proc.write(TRIGGER_COMMAND + "\r")
+                    trigger_sent = True
+                    log.info("sent trigger: %r", TRIGGER_COMMAND)
+                except Exception as e:
+                    log.warning("trigger write failed: %s", e)
+                    _write_outbox_notice(f"trigger 发送失败: {e}", icon="❌")
+                last_output_at = time.time()
+            time.sleep(0.1)
             continue
+
         text = _decode(chunk)
         pty_log.write(text)
         pty_log.flush()
-        buffer += text
-        # Ink TUI breaks words apart with cursor-right escapes; strip those
-        # before substring checks so "trust this folder" / "Welcome back"
-        # match the rendered text rather than the raw byte stream.
+        buffer = (buffer + text)[-4096:]
+        last_output_at = time.time()
         scan = _ansi_blind(buffer)
-        # Trust-folder dialog detection — answer once, then keep reading.
-        # Matched against the ANSI-blind buffer; Ink renders the prompt
-        # text as "Yes,Itrustthisfolder" once color/cursor-move escapes
-        # are stripped.
+
+        # Auto-dismiss trust-folder dialog
         if not trust_dismissed and "trustthisfolder" in scan:
             try:
-                proc.write("\r")  # default selection is "1. Yes"
+                proc.write("\r")
                 trust_dismissed = True
                 log.info("trust-folder dialog: pressed Enter (accept default)")
-                _write_outbox_notice("已通过信任目录确认，等待 TUI 加载…")
+                _write_outbox_notice("已通过信任目录确认，等待加载…")
                 buffer = ""
+                last_output_at = time.time()
             except Exception as e:
                 log.warning("trust-folder accept failed: %s", e)
             continue
-        # Look for any ready marker
-        if any(marker in scan for marker in READY_MARKERS):
-            ready = True
-            elapsed = time.time() - start
-            log.info("TUI ready after %.1fs (saw marker)", elapsed)
-            print(f"[daemon] TUI ready after {elapsed:.1f}s")
-            _write_outbox_notice(f"TUI 已加载（{elapsed:.0f}s），正在激活 chats-loop…")
-            break
 
-    if not ready:
-        log.error("TUI never showed ready marker within %ds; last 500 bytes: %r",
-                  READY_TIMEOUT, buffer[-500:])
-        print(f"[daemon] FAIL: TUI did not become ready within {READY_TIMEOUT}s")
-        print(f"[daemon] check {PTY_LOG_PATH} for what was emitted")
-        _write_outbox_notice(
-            f"TUI 在 {READY_TIMEOUT}s 内未加载完成，请检查 pty.log", icon="❌")
-        _cleanup()
-        return 1
-
-    # Tiny extra settle so the input box is definitely focused
-    time.sleep(1.5)
-
-    # Phase 2: send the trigger command
-    log.info("sending trigger: %r", TRIGGER_COMMAND)
-    print(f"[daemon] sending: {TRIGGER_COMMAND}")
-    try:
-        # \r is the enter key on Windows TUIs
-        proc.write(TRIGGER_COMMAND + "\r")
-    except Exception as e:
-        log.exception("write failed: %s", e)
-        print(f"[daemon] FAIL: could not write to PTY: {e}")
-        _cleanup()
-        return 1
-
-    # Phase 3: confirm the trigger was accepted by reading next few seconds of
-    # output. We're looking for the skill's "chats-loop loop active" line.
-    print("[daemon] waiting for skill activation confirmation...")
-    confirm_buffer = ""
-    confirm_start = time.time()
-    activated = False
-    while time.time() - confirm_start < POST_TRIGGER_SETTLE * 3:
-        try:
-            chunk = proc.read(1024)
-        except Exception:
-            if not proc.isalive():
-                break
-            time.sleep(0.1)
-            continue
-        if not chunk:
-            time.sleep(0.05)
-            continue
-        text = _decode(chunk)
-        pty_log.write(text)
-        pty_log.flush()
-        confirm_buffer += text
-        if "chats-loop loop active" in confirm_buffer or "loop active" in confirm_buffer:
-            activated = True
-            log.info("skill activated")
-            print("[daemon] OK: chats-loop loop active")
+        # Detect chats-loop activation — we're done with startup
+        if trigger_sent and ("chats-loop loop active" in buffer or "loop active" in buffer):
+            log.info("chats-loop activated")
             _write_outbox_notice("已就绪，发消息试试", icon="✅")
             break
 
-    if not activated:
-        log.warning("did not see 'chats-loop loop active' within %ds; continuing anyway "
-                    "(claude may have started loop without printing the marker)",
-                    POST_TRIGGER_SETTLE * 3)
-        print("[daemon] WARN: did not see activation marker, but claude is alive — "
-              "check chat_outbox.txt when you send a test message")
-        _write_outbox_notice("chats-loop 正在初始化（可能已就绪），试着发消息看看")
+    if not proc.isalive():
+        log.error("claude.exe died during startup")
+        _write_outbox_notice("Claude 进程在启动阶段退出", icon="❌")
+        _cleanup()
+        return 1
 
     # Phase 4: drain loop with rate-limit watchdog.
     #
