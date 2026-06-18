@@ -55,17 +55,29 @@ except ImportError:
     print("ERROR: pywinpty not installed. Run: pip install pywinpty", file=sys.stderr)
     sys.exit(2)
 
-CLAUDE_BIN = (
-    Path.home()
-    / "AppData"
-    / "Roaming"
-    / "npm"
-    / "node_modules"
-    / "@anthropic-ai"
-    / "claude-code"
-    / "bin"
-    / "claude.exe"
-)
+def _find_claude_bin() -> Path:
+    """Locate claude.exe: check PATH first, then npm default location.
+
+    shutil.which may return a .cmd wrapper; winpty needs the real .exe,
+    so we resolve through the wrapper's sibling node_modules tree.
+    """
+    import shutil
+    found = shutil.which("claude")
+    if found:
+        p = Path(found).resolve()
+        if p.suffix.lower() == ".cmd":
+            real = p.parent / "node_modules" / "@anthropic-ai" / "claude-code" / "bin" / "claude.exe"
+            if real.exists():
+                return real
+        if p.suffix.lower() == ".exe":
+            return p
+    return (
+        Path.home()
+        / "AppData" / "Roaming" / "npm" / "node_modules"
+        / "@anthropic-ai" / "claude-code" / "bin" / "claude.exe"
+    )
+
+CLAUDE_BIN = _find_claude_bin()
 # Command to auto-type once the TUI is ready. We use the slash-command
 # form (/chats-loop) because that's a deterministic skill route in Claude
 # Code — the harness wires `/skill-name` directly to "invoke this skill",
@@ -137,6 +149,22 @@ def main() -> int:
     # Open pty log fresh each run
     pty_log_path = ctx.session_dir / "pty.log"
     pty_log = open(pty_log_path, "w", encoding="utf-8", errors="replace")
+
+    OUTBOX_PATH = ctx.session_dir / "outbox.txt"
+
+    notice_seq = 0
+
+    def _write_outbox_notice(text: str, *, icon: str = "⏳") -> None:
+        nonlocal notice_seq
+        notice_seq += 1
+        stamp = datetime.now().strftime("%H:%M:%S")
+        body = f"[{stamp}] {icon} {text}  (#{notice_seq})"
+        try:
+            OUTBOX_PATH.write_text(f"[{stamp}]\n{body}\n", encoding="utf-8")
+        except Exception:
+            pass
+
+    _write_outbox_notice("正在启动 Claude…")
 
     # Spawn with --dangerously-skip-permissions so mcp tool calls don't pop
     # interactive prompts. Crucially: set CHATS_LOOP_ALIAS so the child claude
@@ -216,8 +244,7 @@ def main() -> int:
                 proc.write("\r")  # default selection is "1. Yes"
                 trust_dismissed = True
                 log.info("trust-folder dialog: pressed Enter (accept default)")
-                # Reset the buffer so the marker scan doesn't re-fire later
-                # text fragments that happen to contain partial markers.
+                _write_outbox_notice("已通过信任目录确认，等待 TUI 加载…")
                 buffer = ""
             except Exception as e:
                 log.warning("trust-folder accept failed: %s", e)
@@ -225,8 +252,10 @@ def main() -> int:
         # Look for any ready marker
         if any(marker in scan for marker in READY_MARKERS):
             ready = True
-            log.info("TUI ready after %.1fs (saw marker)", time.time() - start)
-            print(f"[daemon] TUI ready after {time.time() - start:.1f}s")
+            elapsed = time.time() - start
+            log.info("TUI ready after %.1fs (saw marker)", elapsed)
+            print(f"[daemon] TUI ready after {elapsed:.1f}s")
+            _write_outbox_notice(f"TUI 已加载（{elapsed:.0f}s），正在激活 chats-loop…")
             break
 
     if not ready:
@@ -234,6 +263,8 @@ def main() -> int:
                   READY_TIMEOUT, buffer[-500:])
         print(f"[daemon] FAIL: TUI did not become ready within {READY_TIMEOUT}s")
         print(f"[daemon] check {PTY_LOG_PATH} for what was emitted")
+        _write_outbox_notice(
+            f"TUI 在 {READY_TIMEOUT}s 内未加载完成，请检查 pty.log", icon="❌")
         _cleanup()
         return 1
 
@@ -277,6 +308,7 @@ def main() -> int:
             activated = True
             log.info("skill activated")
             print("[daemon] OK: chats-loop loop active")
+            _write_outbox_notice("已就绪，发消息试试", icon="✅")
             break
 
     if not activated:
@@ -285,6 +317,7 @@ def main() -> int:
                     POST_TRIGGER_SETTLE * 3)
         print("[daemon] WARN: did not see activation marker, but claude is alive — "
               "check chat_outbox.txt when you send a test message")
+        _write_outbox_notice("chats-loop 正在初始化（可能已就绪），试着发消息看看")
 
     # Phase 4: drain loop with rate-limit watchdog.
     #
@@ -305,30 +338,20 @@ def main() -> int:
     print("[daemon] running. Ctrl+C to stop. Daemon now drains PTY output to claude_pty.log")
     log.info("entering drain loop")
 
-    OUTBOX_PATH = SESSION_DIR / "outbox.txt"
     RATE_LIMIT_MARKERS = ("You've hit your limit", "/rate-limit-options")
-    RECOVERY_INTERVAL_SECS = 300  # 5 min — re-send trigger while rate-limited
-    RECOVERY_COOLDOWN_SECS = 60   # min gap between two "press 3" attempts
-    DETECT_WINDOW_BYTES = 4096    # rolling buffer scanned for the marker
+    PERMISSION_MARKERS = ("Allowonce", "Allowforsession", "Allowalways",
+                          "allowthistool", "Allowtool")
+    PERMISSION_COOLDOWN_SECS = 5
+    RECOVERY_INTERVAL_SECS = 300
+    RECOVERY_COOLDOWN_SECS = 60
+    DETECT_WINDOW_BYTES = 4096
 
-    pty_buffer = ""               # rolling tail of recent decoded PTY output
+    pty_buffer = ""
     rate_limited = False
     last_press_3_at = 0.0
     last_trigger_retry_at = 0.0
-    notice_seq = 0                # ensures successive outbox writes look new
-
-    def _write_outbox_notice(text: str) -> None:
-        nonlocal notice_seq
-        notice_seq += 1
-        stamp = datetime.now().strftime("%H:%M:%S")
-        # Use a sequence number so identical retries don't get dedup'd by
-        # web_server's outbox watcher fingerprint.
-        body = f"[{stamp}] ⚠️ {text}  (#{notice_seq})"
-        try:
-            OUTBOX_PATH.write_text(f"[{stamp}]\n{body}\n", encoding="utf-8")
-            log.info("outbox notice written: %s", text[:80])
-        except Exception as e:
-            log.warning("outbox notice write failed: %s", e)
+    last_perm_accept_at = 0.0
+    perm_accept_count = 0
 
     def _press_3() -> None:
         nonlocal last_press_3_at
@@ -356,6 +379,25 @@ def main() -> int:
                 pty_log.write(text)
                 pty_log.flush()
                 pty_buffer = (pty_buffer + text)[-DETECT_WINDOW_BYTES:]
+                scan_blind = _ansi_blind(pty_buffer)
+                # Detect permission dialog — auto-accept to prevent PTY freeze
+                if any(m in scan_blind for m in PERMISSION_MARKERS):
+                    now = time.time()
+                    if now - last_perm_accept_at >= PERMISSION_COOLDOWN_SECS:
+                        try:
+                            proc.write("y")
+                            last_perm_accept_at = now
+                            perm_accept_count += 1
+                            log.warning("permission dialog detected: sent 'y' (count=%d)", perm_accept_count)
+                        except Exception as e:
+                            log.warning("permission auto-accept failed: %s", e)
+                        if perm_accept_count == 1:
+                            _write_outbox_notice(
+                                "检测到权限确认弹窗（--dangerously-skip-permissions 可能失效），"
+                                "已自动批准。如反复出现请检查 Claude Code 版本。",
+                                icon="⚠️",
+                            )
+                        pty_buffer = ""
                 # Detect rate-limit dialog
                 if any(m in pty_buffer for m in RATE_LIMIT_MARKERS):
                     now = time.time()
@@ -369,8 +411,8 @@ def main() -> int:
                             last_trigger_retry_at = now
                             _write_outbox_notice(
                                 "Claude 账号已撞用量上限。Bridge 会每 5 分钟重试，"
-                                "限额重置后自动恢复。如急用请到电脑切账号："
-                                "cd D:/aiproject/claude-code-account-switch && ccs use <账号>"
+                                "限额重置后自动恢复。如急用请到电脑切账号：ccs use <账号>",
+                                icon="⚠️",
                             )
                         # Clear the buffer so we don't re-match the same text
                         pty_buffer = ""
@@ -380,7 +422,7 @@ def main() -> int:
                     or "loop active" in pty_buffer
                 ):
                     log.info("rate-limit recovery confirmed: loop active")
-                    _write_outbox_notice("Claude 已恢复，可以继续聊了。")
+                    _write_outbox_notice("Claude 已恢复，可以继续聊了。", icon="✅")
                     rate_limited = False
                     pty_buffer = ""
             else:

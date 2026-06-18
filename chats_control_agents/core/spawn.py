@@ -31,7 +31,7 @@ _HISTORICAL_CWD = str(ROOT.parent / "claude-code-account-switch")
 # /chats-loop trigger, skill init, first wait_for_message. 60s is generous
 # but not absurd; the user pays nothing for a successful spawn since the
 # notify fires as soon as the marker shows up.
-READY_NOTIFY_TIMEOUT_SECS = 60.0
+READY_NOTIFY_TIMEOUT_SECS = 120.0
 _MARKER_DIR = Path.home() / ".claude"
 
 
@@ -54,36 +54,22 @@ def _write_outbox_notice(alias: str, body: str) -> None:
 
 
 async def watch_ready(alias: str, daemon_pid: int) -> None:
-    """Background task: wait for the chats-loop skill to activate, then
-    write a user-facing notice via outbox. Started by anyone who just
-    spawned a daemon for `alias`.
+    """Background task: watch daemon process liveness after spawn.
 
-    Outcomes (always exactly one):
-      • marker file appears   → "✅ 已就绪"
-      • daemon process dies   → "⚠️ 启动后异常退出"
-      • timeout               → "⚠️ 拉起超时"
+    The daemon itself writes progress/ready/error notices to outbox.txt
+    via PTY output parsing, so this task only guards against the daemon
+    dying silently (e.g. import error, claude.exe not found).
     """
-    marker = _marker_path(alias)
     deadline = asyncio.get_event_loop().time() + READY_NOTIFY_TIMEOUT_SECS
     while asyncio.get_event_loop().time() < deadline:
-        if marker.exists():
-            _write_outbox_notice(
-                alias, f"✅ 会话 {alias!r} 已就绪，发消息试试"
-            )
-            return
         if not _pid_alive(daemon_pid):
             _write_outbox_notice(
                 alias,
                 f"⚠️ 会话 {alias!r} 启动后异常退出，"
-                f"看 chat_sessions/{alias}/daemon.log",
+                f"看 chat_sessions/{alias}/daemon_stdout.log",
             )
             return
-        await asyncio.sleep(0.5)
-    _write_outbox_notice(
-        alias,
-        f"⚠️ 会话 {alias!r} 拉起超时（{int(READY_NOTIFY_TIMEOUT_SECS)}s 未就绪），"
-        f"可能 child claude 卡在某个弹窗。看 chat_sessions/{alias}/pty.log",
-    )
+        await asyncio.sleep(1.0)
 
 
 # backend 名 → daemon 模块路径。新加 backend 时在这里登记一条。
@@ -115,6 +101,13 @@ def spawn_daemon_detached(alias: str, cwd: str) -> int | None:
     具体起哪个 backend 的 daemon 由 `meta.json.backend` 字段决定（缺省
     `claude_code` 向后兼容）。
     """
+    # Clean stale marker so watch_ready doesn't see a leftover from a previous run
+    stale = _marker_path(alias)
+    if stale.exists():
+        try:
+            stale.unlink()
+        except OSError:
+            pass
     log_path = sx.session_dir(alias) / "daemon_stdout.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     try:
