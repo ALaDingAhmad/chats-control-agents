@@ -91,6 +91,11 @@ def set_current(alias: str) -> None:
         raise ValueError(f"invalid alias: {alias!r}")
     session_dir(alias).mkdir(parents=True, exist_ok=True)
     CURRENT_FILE.write_text(alias, encoding="utf-8")
+    meta = load_meta_for(alias)
+    if isinstance(meta, dict):
+        meta = dict(meta)
+        meta["selected_at"] = datetime.now().isoformat(timespec="seconds")
+        save_meta_for(alias, meta)
 
 
 # ── Default backend (sticky per install, read by /proj when creating sessions) ──

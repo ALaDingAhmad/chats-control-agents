@@ -274,7 +274,7 @@ async def _inbound_longpoll(account: dict):
                     # knows who to send Claude's reply back to. This is a
                     # channel concern, not routing — only persist when the
                     # message actually went to the backend.
-                    if outcome.routed and outcome.alias:
+                    if outcome.alias:
                         _wx.setdefault("alias_peer", {})[outcome.alias] = sender
                         wxs.set_alias_peer(outcome.alias, sender)
 
