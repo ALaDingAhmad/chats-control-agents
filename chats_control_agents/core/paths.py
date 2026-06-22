@@ -67,3 +67,11 @@ def meta_path(alias: str) -> Path:
 
 def spawned_log_path(alias: str) -> Path:
     return session_dir(alias) / "spawned_pids.jsonl"
+
+
+def control_path(alias: str) -> Path:
+    return session_dir(alias) / "pty_control.txt"
+
+
+def control_mode_path(alias: str) -> Path:
+    return session_dir(alias) / "pty_control_mode.txt"
