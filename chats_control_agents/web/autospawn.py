@@ -5,9 +5,18 @@ writes a request to chat_sessions/_autospawn_queue.jsonl. This worker reads
 it and spawns `python -m chats_control_agents.backends.claude_code.daemon <alias> <cwd>`
 detached from the web_server process.
 
-Dedup: we keep a set of aliases already spawned in this process lifetime so
-a duplicated queue entry doesn't double-spawn. The set is per-process; a
-web_server restart re-arms it.
+Dedup is by *liveness*, not by "ever spawned". We skip a queue entry only
+when a daemon for that alias is actually alive right now — either one we
+spawned this lifetime (we remember its pid) or one recorded in meta.json by
+another path. A daemon that has since exited must be re-spawnable, otherwise
+"恢复旧会话" silently does nothing once the original daemon dies.
+
+We still keep a per-process map (alias -> pid we spawned) purely to cover the
+race window between spawn_daemon_detached returning and the daemon writing its
+pid into meta.json: during that gap meta.daemon_pid is stale/None, so a
+duplicated queue entry would double-spawn. The freshly-spawned pid is known
+immediately, so checking it (not mere set membership) closes that window
+without ever permanently blocking a re-spawn.
 """
 from __future__ import annotations
 
@@ -23,7 +32,7 @@ from ..core.spawn import spawn_daemon_detached, watch_ready
 
 log = logging.getLogger("web.autospawn")
 
-_autospawn_running: set[str] = set()  # aliases already spawned in this lifetime
+_autospawn_pids: dict[str, int] = {}  # alias -> pid of the daemon we spawned
 
 # Back-compat alias for callers still importing the underscore-prefixed name.
 _spawn_daemon_detached = spawn_daemon_detached
@@ -61,18 +70,23 @@ async def autospawn_worker():
                 cwd = rec.get("cwd")
                 if not alias or not cwd:
                     continue
-                if alias in _autospawn_running:
-                    log.info("autospawn[%s]: already spawned in this lifetime, skip", alias)
+                # Skip only if a daemon is actually alive — one we spawned
+                # (tracked pid, closes the spawn→meta-write race) or one
+                # recorded in meta by another path. A dead daemon falls
+                # through and gets re-spawned so 恢复旧会话 works.
+                prev_pid = _autospawn_pids.get(alias)
+                if prev_pid and _pid_alive(prev_pid):
+                    log.info("autospawn[%s]: our daemon pid=%s still alive, skip", alias, prev_pid)
                     continue
                 m = sx.load_meta_for(alias) or {}
                 daemon_pid = m.get("daemon_pid")
                 if daemon_pid and _pid_alive(daemon_pid):
                     log.info("autospawn[%s]: daemon pid=%s already alive, skip", alias, daemon_pid)
-                    _autospawn_running.add(alias)
+                    _autospawn_pids[alias] = daemon_pid
                     continue
                 pid = spawn_daemon_detached(alias, cwd)
                 if pid:
-                    _autospawn_running.add(alias)
+                    _autospawn_pids[alias] = pid
                     # Notify the user when chats-loop skill actually activates.
                     # See docs/ROUTING.md "就绪通知".
                     asyncio.create_task(watch_ready(alias, pid))
