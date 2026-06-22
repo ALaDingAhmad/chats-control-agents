@@ -1,11 +1,11 @@
 """Spawn detached daemons and revive dead ones on demand.
 
-Pure OS / subprocess work — no web framework, no channel protocol. Anything
-that needs to bring a backend daemon up calls in here.
+Pure OS / subprocess work. Anything that needs to bring a backend daemon up
+calls in here.
 
 Two entry points:
-  - spawn_daemon_detached(alias, cwd) — start one, return PID or None.
-  - ensure_daemon_alive(alias) — async; idempotent. Used by the router when
+  - spawn_daemon_detached(alias, cwd): start one, return PID or None.
+  - ensure_daemon_alive(alias): async; idempotent. Used by the router when
     an inbound message arrives and the session's daemon may be dead.
 """
 from __future__ import annotations
@@ -26,11 +26,7 @@ log = logging.getLogger("core.spawn")
 
 _HISTORICAL_CWD = str(ROOT.parent / "claude-code-account-switch")
 
-# Total time we'll wait for `~/.claude/.chats-loop-active-<alias>` to appear
-# after we spawn a daemon. Covers: TUI cold start, trust-folder dialog,
-# /chats-loop trigger, skill init, first wait_for_message. 60s is generous
-# but not absurd; the user pays nothing for a successful spawn since the
-# notify fires as soon as the marker shows up.
+# Total time we'll wait for ~/.claude/.chats-loop-active-<alias> after spawn.
 READY_NOTIFY_TIMEOUT_SECS = 120.0
 _MARKER_DIR = Path.home() / ".claude"
 
@@ -40,9 +36,7 @@ def _marker_path(alias: str) -> Path:
 
 
 def _write_outbox_notice(alias: str, body: str) -> None:
-    """Drop a one-shot notice into the alias's outbox so every channel's
-    outbox_watcher forwards it to the user. Mirrors the daemon's notice
-    format so the watcher's dedup fingerprint behaves consistently."""
+    """Write a one-shot notice into outbox.txt for channel watchers."""
     stamp = datetime.now().strftime("%H:%M:%S")
     p = outbox_path(alias)
     try:
@@ -54,34 +48,35 @@ def _write_outbox_notice(alias: str, body: str) -> None:
 
 
 async def watch_ready(alias: str, daemon_pid: int) -> None:
-    """Background task: watch daemon process liveness after spawn.
-
-    The daemon itself writes progress/ready/error notices to outbox.txt
-    via PTY output parsing, so this task only guards against the daemon
-    dying silently (e.g. import error, claude.exe not found).
-    """
+    """Watch daemon liveness and readiness after spawn."""
     deadline = asyncio.get_event_loop().time() + READY_NOTIFY_TIMEOUT_SECS
+    marker = _marker_path(alias)
     while asyncio.get_event_loop().time() < deadline:
+        if marker.exists():
+            _write_outbox_notice(alias, f"✅ 会话 {alias!r} 已就绪，可以继续发消息了。")
+            return
         if not _pid_alive(daemon_pid):
             _write_outbox_notice(
                 alias,
-                f"⚠️ 会话 {alias!r} 启动后异常退出，"
-                f"看 chat_sessions/{alias}/daemon_stdout.log",
+                f"⚠️ 会话 {alias!r} 启动后异常退出，见 chat_sessions/{alias}/daemon_stdout.log",
             )
             return
         await asyncio.sleep(1.0)
+    _write_outbox_notice(
+        alias,
+        f"⚠️ 会话 {alias!r} 拉起超时（{int(READY_NOTIFY_TIMEOUT_SECS)}s 未就绪），"
+        f"可能卡在 Claude TUI；见 chat_sessions/{alias}/daemon_stdout.log",
+    )
 
 
-# backend 名 → daemon 模块路径。新加 backend 时在这里登记一条。
-# 不在这里登记的 backend 起不来——这是有意的最小注册表，避免 import 时副作用。
 _BACKEND_DAEMON_MODULES = {
     "claude_code": "chats_control_agents.backends.claude_code.daemon",
-    "hermes_acp":  "chats_control_agents.backends.hermes_acp.daemon",
+    "hermes_acp": "chats_control_agents.backends.hermes_acp.daemon",
 }
 
 
 def _resolve_daemon_module(alias: str) -> str:
-    """根据 alias 的 meta.json 选 daemon 模块。缺省 claude_code 向后兼容。"""
+    """Resolve daemon module from session meta; defaults to claude_code."""
     meta = sx.load_meta_for(alias) or {}
     backend = meta.get("backend") or "claude_code"
     mod = _BACKEND_DAEMON_MODULES.get(backend)
@@ -92,16 +87,7 @@ def _resolve_daemon_module(alias: str) -> str:
 
 
 def spawn_daemon_detached(alias: str, cwd: str) -> int | None:
-    """Spawn the daemon detached from this process. Returns PID or None on failure.
-
-    Windows: DETACHED + CREATE_NEW_PROCESS_GROUP + CREATE_NO_WINDOW so the
-    daemon survives web_server restart and doesn't pop a console window.
-    Unix: start_new_session to detach from the caller's process group.
-
-    具体起哪个 backend 的 daemon 由 `meta.json.backend` 字段决定（缺省
-    `claude_code` 向后兼容）。
-    """
-    # Clean stale marker so watch_ready doesn't see a leftover from a previous run
+    """Spawn the daemon detached from this process."""
     stale = _marker_path(alias)
     if stale.exists():
         try:
@@ -123,19 +109,16 @@ def spawn_daemon_detached(alias: str, cwd: str) -> int | None:
         "close_fds": True,
     }
     if os.name == "nt":
-        DETACHED = 0x00000008
-        CREATE_NEW_PROCESS_GROUP = 0x00000200
-        CREATE_NO_WINDOW = 0x08000000
-        kwargs["creationflags"] = DETACHED | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+        detached = 0x00000008
+        new_process_group = 0x00000200
+        no_window = 0x08000000
+        kwargs["creationflags"] = detached | new_process_group | no_window
     else:
         kwargs["start_new_session"] = True
 
     daemon_module = _resolve_daemon_module(alias)
     try:
-        proc = subprocess.Popen(
-            ["python", "-m", daemon_module, alias, cwd],
-            **kwargs,
-        )
+        proc = subprocess.Popen(["python", "-m", daemon_module, alias, cwd], **kwargs)
         log.info("spawn[%s]: backend-module=%s pid=%s cwd=%s", alias, daemon_module, proc.pid, cwd)
         return proc.pid
     except Exception as e:
@@ -144,12 +127,7 @@ def spawn_daemon_detached(alias: str, cwd: str) -> int | None:
 
 
 async def ensure_daemon_alive(alias: str) -> bool:
-    """If alias's daemon is dead, spawn a new one and wait until ready.
-
-    Returns True if a daemon is alive (already was, or successfully revived).
-    Returns False if spawn failed or the process never went live — caller
-    should surface an "agent failed to come up" message to the user.
-    """
+    """If alias's daemon is dead, spawn a new one and wait until alive."""
     m = sx.load_meta_for(alias) or {}
     pid = m.get("daemon_pid")
     if pid and _pid_alive(pid):
@@ -162,20 +140,9 @@ async def ensure_daemon_alive(alias: str) -> bool:
         log.warning("ensure[%s]: spawn failed", alias)
         return False
 
-    # Ready = daemon process is alive. We used to additionally wait for the
-    # skill-activated marker in daemon.log, but that's flaky — Claude can take
-    # 20-40s to do TUI startup → /chats-loop slash → env lookup → relay_init
-    # → first wait_for_message, and the harness sometimes never prints the
-    # exact marker string we looked for. Writing to inbox is safe even if
-    # skill is still initializing: mcp_bridge.py polls the inbox file at 0.5s
-    # cadence inside wait_for_message, so the message will be picked up the
-    # moment the loop starts.
-    for _ in range(20):  # give the OS a moment to schedule the new daemon process
+    for _ in range(20):
         if _pid_alive(spawned_pid):
             log.info("ensure[%s]: daemon pid=%s alive", alias, spawned_pid)
-            # Fire-and-forget readiness watcher. Notifies user (via outbox)
-            # once chats-loop skill activates, or surfaces a failure if it
-            # never does. See docs/ROUTING.md "就绪通知".
             asyncio.create_task(watch_ready(alias, spawned_pid))
             return True
         await asyncio.sleep(0.1)
