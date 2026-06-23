@@ -9,6 +9,7 @@ from starlette.responses import HTMLResponse, JSONResponse
 from ...core import commands as cmd
 from ...core import sessions as sx
 from ...core.paths import inbox_path, outbox_path
+from ...core.router import route_inbound
 from ..helpers import load_history, now_iso, save_history
 
 
@@ -150,52 +151,19 @@ async def send_message(request):
     if not text:
         return JSONResponse({"ok": False, "reason": "empty"})
 
-    # Slash commands handled in-process; never go to the agent.
-    if cmd.is_command(text):
-        reply = cmd.handle_command(text)
-        alias = sx.get_current()
-        history = load_history(alias)
-        ts = now_iso()
-        history.append({"role": "user", "text": text, "ts": ts, "source": "browser:command"})
-        history.append({"role": "assistant", "text": reply, "ts": ts, "source": "command"})
-        save_history(history, alias)
-        log.info("send: command %r", text[:50])
-        return JSONResponse({"ok": True, "command": True, "reply": reply})
+    outcome = await route_inbound(text, source="browser")
+    alias = outcome.alias or sx.get_current()
 
-    # Regular message: route to currently selected session.
-    # `//foo` is the passthrough escape — strip one slash so child agent sees /foo.
-    text = cmd.strip_passthrough_prefix(text)
-    alias = sx.get_current()
-    if not alias:
-        return JSONResponse({
-            "ok": False, "reason": "no_session",
-            "hint": "还没有活跃会话，请到 dashboard 创建一个，或用 /proj 选项目。",
-        })
-    log.info("send to %s: %d chars", alias, len(text))
-    # Revive daemon on demand if it died while idle.
-    from ..spawn_helpers import ensure_daemon_alive
-    alive = await ensure_daemon_alive(alias)
-    if not alive:
+    if outcome.reply:
+        ts = now_iso()
         history = load_history(alias)
-        history.append({"role": "user", "text": text, "ts": now_iso()})
-        history.append({
-            "role": "assistant",
-            "text": "⚠️ agent 拉起失败，请稍后再试或检查 daemon.log。",
-            "ts": now_iso(), "source": "system",
-        })
+        history.append({"role": "user", "text": text, "ts": ts, "source": "browser"})
+        history.append({"role": "assistant", "text": outcome.reply, "ts": ts, "source": "command"})
         save_history(history, alias)
-        return JSONResponse({"ok": False, "reason": "daemon_unavailable", "alias": alias})
-    # Clear stale outbox FIRST so /poll won't return last turn's reply as
-    # if it were the answer to this new message.
-    try:
-        outbox_path(alias).write_text("", encoding="utf-8")
-    except Exception as e:
-        log.warning("clear outbox failed: %s", e)
-    inbox_path(alias).parent.mkdir(parents=True, exist_ok=True)
-    inbox_path(alias).write_text(text, encoding="utf-8")
-    history = load_history(alias)
-    history.append({"role": "user", "text": text, "ts": now_iso()})
-    save_history(history, alias)
+        is_cmd = cmd.is_command(text)
+        return JSONResponse({"ok": True, "command": is_cmd, "reply": outcome.reply})
+
+    # routed to inbox — history already recorded by route_inbound
     return JSONResponse({"ok": True, "alias": alias})
 
 

@@ -11,7 +11,7 @@ from typing import Optional
 from . import commands as cmd
 from . import sessions as sx
 from .history import load_history, now_iso, save_history
-from .paths import control_mode_path, control_path, inbox_path
+from .paths import control_mode_path, control_path, inbox_path, outbox_path
 from .proj_choices import proj_choices_active, write_proj_choices
 from .spawn import ensure_daemon_alive
 
@@ -118,6 +118,11 @@ async def route_inbound(text: str, source: str) -> RouteOutcome:
     alive = await ensure_daemon_alive(alias)
     if not alive:
         return RouteOutcome(reply="⚠️ agent 拉起失败，请稍后再试。", alias=alias)
+
+    try:
+        outbox_path(alias).write_text("", encoding="utf-8")
+    except Exception:
+        pass
 
     p = inbox_path(alias)
     p.parent.mkdir(parents=True, exist_ok=True)

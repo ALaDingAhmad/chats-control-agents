@@ -52,6 +52,8 @@ _NOISE_PATTERNS = (
     "forthebestexperience",
     "organization",
     "try\"createautil",
+    "contemplating",
+    "thinking",
 )
 _NOISE_REGEXES = (
     re.compile(r"ctx:\d+%.*\$0\.\d+.*5h:\d+%.*7d:\d+%", re.IGNORECASE),
@@ -213,6 +215,9 @@ def main() -> int:
         except Exception:
             pass
 
+    def _dedup_key(s: str) -> str:
+        return re.sub(r"[✻✶✢✽·*\s]+", "", s)
+
     def relay_block(block: str) -> None:
         nonlocal last_menu_payload
         text = block.strip()
@@ -224,7 +229,8 @@ def main() -> int:
             payload = f"{text}\n{extra}"
         else:
             payload = text
-        if payload == last_menu_payload:
+        key = _dedup_key(payload)
+        if key == _dedup_key(last_menu_payload):
             return
         last_menu_payload = payload
         stamp = datetime.now().strftime("%H:%M:%S")
@@ -293,7 +299,7 @@ def main() -> int:
         all_lines = list(pending_lines)
         pending_lines = []
         full_text = "\n".join(all_lines).strip()
-        if not full_text or full_text == last_relayed_block:
+        if not full_text or _dedup_key(full_text) == _dedup_key(last_relayed_block):
             return
         last_relayed_block = full_text
         chunk_size = 15
