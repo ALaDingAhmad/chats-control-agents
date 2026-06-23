@@ -12,6 +12,7 @@ from . import commands as cmd
 from . import sessions as sx
 from .history import load_history, now_iso, save_history
 from .paths import control_mode_path, control_path, inbox_path
+from .proj_choices import proj_choices_active, write_proj_choices
 from .spawn import ensure_daemon_alive
 
 
@@ -32,19 +33,28 @@ def _selected_recently(alias: str) -> bool:
     return (time.time() - selected_at) <= RECENT_SELECTION_GRACE_SECS
 
 
-def _is_pty_control_input(text: str, alias: str | None) -> bool:
+def _consume_pty_arm(alias: str | None) -> bool:
+    """One-shot: was a child-TUI menu armed? Read-and-delete the flag.
+
+    daemon writes `control_mode_path == "menu"` only right after it relayed a
+    block that looks like a selectable menu. We consume (delete) it on the very
+    next inbound, so a bare digit counts as a PTY control sequence only in the
+    turn immediately after the menu appeared — never lingering into chat.
+    """
     if not alias:
-        return False
-    s = text.strip()
-    if not s or not re.fullmatch(r"\d+", s):
         return False
     mode_file = control_mode_path(alias)
     if not mode_file.exists():
         return False
     try:
-        return mode_file.read_text(encoding="utf-8").strip() == "menu"
+        armed = mode_file.read_text(encoding="utf-8").strip() == "menu"
     except Exception:
-        return False
+        armed = False
+    try:
+        mode_file.unlink()
+    except Exception:
+        pass
+    return armed
 
 
 @dataclass
@@ -55,11 +65,27 @@ class RouteOutcome:
 
 
 async def route_inbound(text: str, source: str) -> RouteOutcome:
+    # ── one-shot menu arming, consumed THIS turn (see docs/ROUTING.md) ──
+    # Read+delete the pty arm and snapshot the proj arm before any dispatch,
+    # so a bare digit counts as a menu pick only in the turn right after the
+    # menu showed up; otherwise it falls through to chat.
+    alias0 = sx.get_current()
+    pty_armed = _consume_pty_arm(alias0)
+    proj_armed = proj_choices_active()
+    is_digit = text.strip().isdigit()
+
     if cmd.is_command(text):
+        # digit-while-proj-armed lands here and picks the project; the pick
+        # clears proj_choices internally.
         alias_before = sx.get_current()
         reply = cmd.handle_command(text)
         alias_after = sx.get_current()
         return RouteOutcome(reply=reply, alias=alias_after or alias_before)
+
+    # Not a proj pick. If a proj menu was armed, this inbound disarms it —
+    # control and chat don't mix; the menu only lived for that one turn.
+    if proj_armed:
+        write_proj_choices(None)
 
     text = cmd.strip_passthrough_prefix(text)
 
@@ -67,7 +93,7 @@ async def route_inbound(text: str, source: str) -> RouteOutcome:
     if not alias:
         return RouteOutcome(reply="⚠️ 还没有活动会话，请先在 dashboard 创建一个。")
 
-    if _is_pty_control_input(text, alias):
+    if is_digit and pty_armed:
         p = control_path(alias)
         p.parent.mkdir(parents=True, exist_ok=True)
         try:

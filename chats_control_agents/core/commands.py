@@ -118,7 +118,7 @@ def _help_text() -> str:
     # the browser render newlines correctly; we treat PC WeChat as known-bad.
     return (
         "可用命令：\n"
-        "/proj — 列出工作空间下的项目（回复编号切换/启动）\n"
+        "/proj [关键词] — 列出项目（可搜索，回复编号切换/启动）\n"
         "/list — 列出所有会话\n"
         "/use 「alias」— 切到指定会话\n"
         "/new — 同 /proj（列项目，回 0 开空会话，回数字开/切项目）\n"
@@ -176,6 +176,7 @@ def _cmd_proj(args: list[str]) -> str:
         return f"工作空间 {', '.join(str(r) for r in roots)} 下没有项目目录。"
 
     page = 1
+    search_term = ""
     if args:
         a = args[0].lower()
         if a == "more":
@@ -183,6 +184,12 @@ def _cmd_proj(args: list[str]) -> str:
             page = last_page + 1
         elif a.isdigit():
             page = max(1, int(a))
+        else:
+            search_term = a
+            projects = [p for p in projects if search_term in p["name"].lower()]
+            if not projects:
+                return f"没有匹配 '{search_term}' 的项目。"
+
     total = len(projects)
     pages = (total + _PROJ_PAGE_SIZE - 1) // _PROJ_PAGE_SIZE
     page = min(page, pages) if pages else 1
@@ -190,7 +197,10 @@ def _cmd_proj(args: list[str]) -> str:
     end = min(start + _PROJ_PAGE_SIZE, total)
     visible = projects[start:end]
 
-    lines = [f"项目（第 {page}/{pages} 页，共 {total} 个）"]
+    header = f"项目（第 {page}/{pages} 页，共 {total} 个）"
+    if search_term:
+        header += f"  搜索：{search_term}"
+    lines = [header]
     last_root = None
     for i, p in enumerate(visible, start=start + 1):
         if p["root"] != last_root:

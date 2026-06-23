@@ -40,11 +40,47 @@ class RouteOutcome:
 `alias → peer_id` 落到 `weixin_state/alias_peer.json`，让 outbox watcher
 在 web_server 重启后还能把 Claude 的回复送到对的人。
 
+## 纯数字入站：一次性菜单选择（one-shot）
+
+**铁律：控制选项与聊天不混着发；一个菜单只在"刚弹出那一回合"认数字。**
+
+桥里有两种会"用数字选择"的菜单，但它们**绝不常驻**——只在被展示的那一刻
+arm 一个一次性令牌，**下一条入站消息消费掉它，无论这条是不是数字**：
+
+| 菜单来源 | arm 方式 | 数字命中后的动作 |
+|---|---|---|
+| `/proj` 项目列表（桥控制面） | `_cmd_proj` 写 `proj_choices`（含项目数据） | `_cmd_pick_proj(n)` 切/起项目 |
+| child claude TUI 菜单（后端） | daemon 检测到中继块"像菜单"时写 `control_mode_path == "menu"` | 写 `control_path`，回灌成 PTY 控制序列 |
+
+`route_inbound` 在**最顶端**消费令牌：
+
+1. 读并删除 `control_mode_path(alias)`（pty arm，一次性）；读 `proj_choices`
+   是否 active（proj arm）。
+2. 本条是纯数字 `\d+` 且某个菜单 arm 着 → 当选择，按来源分派（**proj 优先于
+   pty**：两个同时 arm 时项目切换赢，pty 令牌也已被删除不残留）。
+3. 否则（不是数字，或没有 arm）→ 令牌已被清掉，数字**落 inbox 当普通聊天**
+   发给 child claude。proj arm 若没被数字消费，这一步也显式清掉（非数字入站
+   即解除）。
+
+**故意的副作用**：`/proj → 你好 → 2` 这种流程，`你好` 已经消费掉"菜单那一
+回合"，`2` 会当聊天而不是切项目。只有 `/proj → 2`（紧接着）才切。这是
+"控制与聊天不混着发"的直接代价，是要的行为，不是 bug。
+
+**daemon 侧"像菜单"判据**（`_looks_like_menu`，工程 heuristic，可调）：中继块
+含选择光标 `❯`，或有 ≥2 行匹配 `^\s*[❯>]?\s*\d+[.):、]\s+\S`（编号选项）。
+普通散文回复不命中 → 纯文本中继、不 arm、不追加 `8/9/digits` 控制脚注。
+`8`(auto wake)/`9`(ESC) 这类控制位同样只在 arm 着的那一回合生效。
+
+> 历史包袱：在此规则前 `control_mode` 是**全程常开**的（daemon 启动/启动后/
+> 每次中继块都 set True，仅退出时 False），导致 `/proj` 120s 窗口外任何数字
+> 都被当 PTY 控制吞掉。one-shot 改造同时废掉了这个常开态与 120s 时间窗
+> （`proj_choices.expires_at` 降级为"无人接话时的兜底 TTL"，主语义是一次性）。
+
 ## route_inbound 内部决策顺序
 
 1. **是否 slash 命令** — `commands.is_command(text)` 对单 `/` 命令、或者
    `/proj` 选号窗口内的纯数字返回 True。命中就跑 `commands.handle_command`
-   返回 reply，不动后端。
+   返回 reply，不动后端。（数字 arm 的消费见上节"纯数字入站"，发生在本步之前。）
 
    命令里有一类"**元命令**"——不直接操作当前会话，而是改"之后建会话时的
    参数"。目前只有 `/backend [<name>]`：看/切默认 backend，落

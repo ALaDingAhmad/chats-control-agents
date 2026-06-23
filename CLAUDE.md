@@ -56,5 +56,6 @@ web_server.py (Starlette, port = config.json:web_port，缺省 8765)
 
 ## 配置版本
 
+- 2026-06-22：纯数字入站语义改 one-shot 菜单选择（详见 `docs/ROUTING.md` "纯数字入站"段）。废掉了 daemon **全程常开的 `control_mode`**——以前 `/proj` 120s 窗口外任何数字都被当 PTY 控制吞掉。现在数字默认是聊天，只有菜单刚弹出那一回合才认。daemon `write_menu_block` 拆成"普通文本纯中继 / 菜单才 arm+脚注"（`_looks_like_menu` heuristic）。
 - 最后更新：2026-06-08（创建后同日修了 outbox 残留重放 bug，已同步"已知坑"那段）
 - 起因：会话恢复后从老 handoff（提到 `agent_bridge` 包名、`WEB_RELAY_ALIAS` env、`web-chat` MCP 名）转过来，发现 06-04 之后的 14 个 commit 把这些都改了。沉淀到本文件，避免下次会话再被老 handoff 误导。

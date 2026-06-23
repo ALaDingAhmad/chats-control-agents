@@ -59,6 +59,15 @@ _NOISE_REGEXES = (
     re.compile(r"^[a-z0-9_-]+@desktop-", re.IGNORECASE),
 )
 
+_MENU_NUMBERED_LINE = re.compile(r"^\s*[❯>]?\s*\d+[.):、]\s+\S")
+
+
+def _looks_like_menu(lines: list[str]) -> bool:
+    if any("❯" in ln for ln in lines):
+        return True
+    return sum(1 for ln in lines if _MENU_NUMBERED_LINE.match(ln)) >= 2
+
+
 TRIGGER_COMMAND = "/chats-loop"
 READY_SETTLE_SECS = 3
 AUTO_WAKE_INTERVAL_SECS = 8.0
@@ -204,11 +213,17 @@ def main() -> int:
         except Exception:
             pass
 
-    def write_menu_block(block: str) -> None:
+    def relay_block(block: str) -> None:
         nonlocal last_menu_payload
-        menu = block.strip()
-        extra = "\n8 auto wake loop\n9 send ESC\nreply digits like 234"
-        payload = f"{menu}\n{extra}" if menu else extra.lstrip("\n")
+        text = block.strip()
+        if not text:
+            return
+        is_menu = _looks_like_menu(text.splitlines())
+        if is_menu:
+            extra = "\n8 auto wake loop\n9 send ESC\nreply digits like 234"
+            payload = f"{text}\n{extra}"
+        else:
+            payload = text
         if payload == last_menu_payload:
             return
         last_menu_payload = payload
@@ -217,7 +232,8 @@ def main() -> int:
             outbox_path.write_text(f"[{stamp}]\n{payload}\n", encoding="utf-8")
         except Exception:
             pass
-        set_control_mode(True)
+        if is_menu:
+            set_control_mode(True)
 
     def wake_loop() -> None:
         nonlocal last_auto_wake_at
@@ -274,12 +290,21 @@ def main() -> int:
             return
         if not force and (time.time() - last_pending_at) < 1.2:
             return
-        block = "\n".join(pending_lines[-8:]).strip()
+        all_lines = list(pending_lines)
         pending_lines = []
-        if not block or block == last_relayed_block:
+        full_text = "\n".join(all_lines).strip()
+        if not full_text or full_text == last_relayed_block:
             return
-        last_relayed_block = block
-        write_menu_block(block)
+        last_relayed_block = full_text
+        chunk_size = 15
+        chunks = [all_lines[i:i + chunk_size] for i in range(0, len(all_lines), chunk_size)]
+        for idx, chunk in enumerate(chunks):
+            block = "\n".join(chunk).strip()
+            if not block:
+                continue
+            relay_block(block)
+            if idx < len(chunks) - 1:
+                time.sleep(0.7)
 
     def relay_pty_text(text: str) -> None:
         nonlocal pending_lines, last_pending_at
@@ -292,7 +317,6 @@ def main() -> int:
         last_pending_at = time.time()
 
     write_outbox_notice("starting Claude")
-    set_control_mode(True)
 
     spawn_env = {**os.environ, "CHATS_LOOP_ALIAS": ALIAS}
     proc = PtyProcess.spawn(
