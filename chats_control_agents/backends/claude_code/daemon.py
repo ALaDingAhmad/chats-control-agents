@@ -59,6 +59,7 @@ _NOISE_REGEXES = (
     re.compile(r"ctx:\d+%.*\$0\.\d+.*5h:\d+%.*7d:\d+%", re.IGNORECASE),
     re.compile(r"\$0\.\d+.*5h:\d+%.*7d:\d+%", re.IGNORECASE),
     re.compile(r"^[a-z0-9_-]+@desktop-", re.IGNORECASE),
+    re.compile(r"^[✻✶✢✽·*]*\w{3,30}(?:\.{3}|…)"),
 )
 
 _MENU_NUMBERED_LINE = re.compile(r"^\s*[❯>]?\s*\d+[.):、]\s+\S")
