@@ -271,7 +271,7 @@ def main() -> int:
         proc.write("\x1b")
 
     def handle_control_input() -> None:
-        nonlocal auto_wake_enabled
+        nonlocal auto_wake_enabled, loop_active
         if not control_file.exists():
             return
         try:
@@ -292,8 +292,15 @@ def main() -> int:
             write_outbox_notice(f"auto wake loop {state}")
             return
         if command == "9":
+            # ESC 打断当前回合后 child claude 停在提示符，不会自己回到
+            # wait_for_message——必须立刻重唤循环，否则消息落 inbox 没人取
+            # = 永久失联（docs/入站路由.md "/stop"段，07-17 实测）。
             send_escape()
+            loop_active = False
             write_outbox_notice("sent ESC")
+            time.sleep(1.0)  # 让 ESC 生效、TUI 回到 prompt
+            wake_loop()
+            write_outbox_notice("rewaking chats-loop")
             return
         ensure_loop_awake()
         send_digit_sequence(command)
