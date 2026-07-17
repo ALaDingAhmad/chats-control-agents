@@ -17,6 +17,7 @@ Tools:
 Log: ./mcp_bridge.log  (shared across sessions, prefixed by alias)
 """
 import atexit
+import json
 import logging
 import os
 import sys
@@ -47,9 +48,50 @@ def _initial_alias() -> str:
     return make_alias_for_cwd(os.getcwd())
 
 
+def _ensure_meta(alias: str, session_dir: Path) -> None:
+    """Ensure meta.json exists and records our bridge_pid so web/dashboard can discover this session.
+
+    Registration only — NEVER touches _current.txt. Becoming the current
+    session requires an explicit user pick (/proj, /use, dashboard); a bridge
+    that grabs routing on startup hijacks all inbound the moment any claude
+    window opens (docs/ROUTING.md "终端 chats-loop 会话").
+    """
+    meta_file = session_dir / "meta.json"
+    bridge_info: dict = {"bridge_pid": os.getpid()}
+    try:
+        import psutil
+        bridge_info["bridge_create_time"] = psutil.Process(os.getpid()).create_time()
+    except Exception:
+        pass
+
+    if meta_file.exists():
+        try:
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        except Exception:
+            meta = {}
+        meta.update(bridge_info)
+    else:
+        meta = {
+            "alias": alias,
+            "cwd": os.getcwd(),
+            "backend": "claude_code",
+            "daemon_pid": None,
+            "child_pid": None,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            **bridge_info,
+        }
+    try:
+        tmp = meta_file.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(meta_file)
+    except Exception:
+        pass
+
+
 ALIAS = _initial_alias()
 SESSION_DIR = ROOT / "chat_sessions" / ALIAS
 SESSION_DIR.mkdir(parents=True, exist_ok=True)
+_ensure_meta(ALIAS, SESSION_DIR)
 INBOX = SESSION_DIR / "inbox.txt"
 OUTBOX = SESSION_DIR / "outbox.txt"
 # Marker file watched by ~/.claude/hooks/chats_loop_pretool_hook.py.
@@ -74,6 +116,7 @@ def _retarget_alias(new_alias: str) -> None:
     ALIAS = new_alias
     SESSION_DIR = ROOT / "chat_sessions" / ALIAS
     SESSION_DIR.mkdir(parents=True, exist_ok=True)
+    _ensure_meta(ALIAS, SESSION_DIR)
     INBOX = SESSION_DIR / "inbox.txt"
     OUTBOX = SESSION_DIR / "outbox.txt"
     MARKER = Path.home() / ".claude" / f".chats-loop-active-{ALIAS}"
@@ -151,8 +194,18 @@ def wait_for_message(timeout_seconds: int = 0) -> str:
     )
     deadline = time.time() + wait_secs
     poll_interval = 0.5
+    last_touch = time.time()
 
     while time.time() < deadline:
+        # Heartbeat lease: keep marker mtime fresh only while actually
+        # blocked in this wait — liveness checks read freshness, not
+        # existence, to tell "waiting" from "loop stopped / stale leftover".
+        if time.time() - last_touch >= 5.0:
+            try:
+                MARKER.touch(exist_ok=True)
+            except Exception:
+                pass
+            last_touch = time.time()
         if INBOX.exists():
             try:
                 text = INBOX.read_text(encoding="utf-8").strip()
@@ -184,6 +237,10 @@ def send_chat_response(reply: str) -> str:
     session alive — the loop never ends until the user explicitly stops it.
     """
     log.info("send_chat_response called, %d chars", len(reply))
+    try:
+        MARKER.touch(exist_ok=True)  # replying = still serving; renew lease
+    except Exception:
+        pass
     stamp = datetime.now().strftime("%H:%M:%S")
     OUTBOX.write_text(f"[{stamp}]\n{reply}\n", encoding="utf-8")
     return f"OK, sent {len(reply)} chars. Now call wait_for_message to await next user message."

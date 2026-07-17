@@ -11,6 +11,7 @@ how Python found the package.
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 
 # Project root = directory containing the `chats_control_agents` package
@@ -75,3 +76,25 @@ def control_path(alias: str) -> Path:
 
 def control_mode_path(alias: str) -> Path:
     return session_dir(alias) / "pty_control_mode.txt"
+
+
+def loop_marker_path(alias: str) -> Path:
+    """chats-loop 激活 marker：mcp_bridge 在 wait_for_message 期间心跳 touch，
+    进程退出时删。"出现" = skill 已激活（watch_ready 用）；"当前在收件"
+    要看 mtime 新鲜度，用 loop_marker_fresh()（docs/ROUTING.md "就绪通知/信号源"）。"""
+    return Path.home() / ".claude" / f".chats-loop-active-{alias}"
+
+
+# marker 心跳租约 TTL。mcp_bridge 在 wait 阻塞期间每 ~5s touch 一次，
+# 循环停了 mtime 不再刷新，超过 TTL 即判"不在收件"——哪怕文件还在
+# （硬杀进程会留残留）、哪怕 bridge 进程还活着（只是挂着 MCP 没跑循环）。
+LOOP_MARKER_TTL_SECS = 180.0
+
+
+def loop_marker_fresh(alias: str, ttl: float = LOOP_MARKER_TTL_SECS) -> bool:
+    """True = chats-loop 循环当前真的在收件（marker mtime 在 TTL 内）。
+    在线/可服务判定一律用本函数，不许只查 bridge PID 或 marker 存在性。"""
+    try:
+        return (time.time() - loop_marker_path(alias).stat().st_mtime) <= ttl
+    except OSError:
+        return False

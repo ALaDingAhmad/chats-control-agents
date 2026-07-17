@@ -27,6 +27,7 @@ from .paths import (
     SESSIONS_ROOT,
     history_path,
     inbox_path,
+    loop_marker_fresh,
     meta_path,
     outbox_path,
     session_dir,
@@ -188,36 +189,48 @@ def _reconcile_meta_liveness(alias: str, meta: dict) -> tuple[dict, bool]:
     向后兼容：老 meta 没有 `daemon_create_time` 字段时退化到只用
     `_pid_alive`（跟改动前同行为）。
     """
-    daemon_pid = meta.get("daemon_pid")
-    if not daemon_pid:
-        return meta, False  # 已经是 null，无事可做
-    if not _pid_alive(daemon_pid):
-        # PID 直接不在了，无歧义
-        fixed = dict(meta)
-        fixed["daemon_pid"] = None
-        fixed["child_pid"] = None
-        fixed.setdefault("last_exit_at", "(detected_dead)")
-        return fixed, True
-
-    # PID 活着——但要确认是不是同一个进程
-    logged_ct = meta.get("daemon_create_time")
-    if logged_ct is None:
-        return meta, False  # 老 meta 没记 create_time，没法二次验证；保持兼容
-    try:
-        import psutil
-        actual_ct = psutil.Process(daemon_pid).create_time()
-    except Exception:
-        # psutil 没装 / 进程恰好刚死 / 无权限——保守地认为还活着，
-        # 不冒"清掉真活进程"的风险
-        return meta, False
-    if abs(actual_ct - logged_ct) < 1.0:
-        return meta, False  # 是同一个 daemon，确认在线
-    # PID 复用：现在那个进程不是我们的 daemon
+    changed = False
     fixed = dict(meta)
-    fixed["daemon_pid"] = None
-    fixed["child_pid"] = None
-    fixed.setdefault("last_exit_at", "(detected_dead_pid_recycled)")
-    return fixed, True
+
+    daemon_pid = meta.get("daemon_pid")
+    if daemon_pid:
+        if not _pid_alive(daemon_pid):
+            fixed["daemon_pid"] = None
+            fixed["child_pid"] = None
+            fixed.setdefault("last_exit_at", "(detected_dead)")
+            changed = True
+        else:
+            logged_ct = meta.get("daemon_create_time")
+            if logged_ct is not None:
+                try:
+                    import psutil
+                    actual_ct = psutil.Process(daemon_pid).create_time()
+                    if abs(actual_ct - logged_ct) >= 1.0:
+                        fixed["daemon_pid"] = None
+                        fixed["child_pid"] = None
+                        fixed.setdefault("last_exit_at", "(detected_dead_pid_recycled)")
+                        changed = True
+                except Exception:
+                    pass
+
+    bridge_pid = meta.get("bridge_pid")
+    if bridge_pid:
+        if not _pid_alive(bridge_pid):
+            fixed["bridge_pid"] = None
+            changed = True
+        else:
+            logged_ct = meta.get("bridge_create_time")
+            if logged_ct is not None:
+                try:
+                    import psutil
+                    actual_ct = psutil.Process(bridge_pid).create_time()
+                    if abs(actual_ct - logged_ct) >= 1.0:
+                        fixed["bridge_pid"] = None
+                        changed = True
+                except Exception:
+                    pass
+
+    return fixed, changed
 
 
 def list_sessions() -> list[dict]:
@@ -242,7 +255,11 @@ def list_sessions() -> list[dict]:
             except Exception:
                 pass  # 写盘失败不阻塞列表渲染——下次扫描再尝试
         daemon_pid = m.get("daemon_pid")
-        online = bool(daemon_pid) and _pid_alive(daemon_pid)
+        bridge_pid = m.get("bridge_pid")
+        # bridge 活只说明 MCP 挂着；真在收件要看 marker 新鲜度（docs/ROUTING.md）
+        online = (bool(daemon_pid) and _pid_alive(daemon_pid)) or (
+            bool(bridge_pid) and _pid_alive(bridge_pid) and loop_marker_fresh(alias)
+        )
         out.append({
             "alias": alias,
             "cwd": m.get("cwd", ""),

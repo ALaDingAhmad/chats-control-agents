@@ -15,10 +15,9 @@ import logging
 import os
 import subprocess
 from datetime import datetime
-from pathlib import Path
 
 from . import sessions as sx
-from .paths import ROOT, outbox_path
+from .paths import ROOT, loop_marker_fresh, loop_marker_path, outbox_path
 from .pid_track import _pid_alive
 
 
@@ -28,11 +27,6 @@ _HISTORICAL_CWD = str(ROOT.parent / "claude-code-account-switch")
 
 # Total time we'll wait for ~/.claude/.chats-loop-active-<alias> after spawn.
 READY_NOTIFY_TIMEOUT_SECS = 120.0
-_MARKER_DIR = Path.home() / ".claude"
-
-
-def _marker_path(alias: str) -> Path:
-    return _MARKER_DIR / f".chats-loop-active-{alias}"
 
 
 def _write_outbox_notice(alias: str, body: str) -> None:
@@ -50,7 +44,7 @@ def _write_outbox_notice(alias: str, body: str) -> None:
 async def watch_ready(alias: str, daemon_pid: int) -> None:
     """Watch daemon liveness and readiness after spawn."""
     deadline = asyncio.get_event_loop().time() + READY_NOTIFY_TIMEOUT_SECS
-    marker = _marker_path(alias)
+    marker = loop_marker_path(alias)
     while asyncio.get_event_loop().time() < deadline:
         if marker.exists():
             _write_outbox_notice(alias, f"✅ 会话 {alias!r} 已就绪，可以继续发消息了。")
@@ -88,7 +82,7 @@ def _resolve_daemon_module(alias: str) -> str:
 
 def spawn_daemon_detached(alias: str, cwd: str) -> int | None:
     """Spawn the daemon detached from this process."""
-    stale = _marker_path(alias)
+    stale = loop_marker_path(alias)
     if stale.exists():
         try:
             stale.unlink()
@@ -127,11 +121,22 @@ def spawn_daemon_detached(alias: str, cwd: str) -> int | None:
 
 
 async def ensure_daemon_alive(alias: str) -> bool:
-    """If alias's daemon is dead, spawn a new one and wait until alive."""
+    """If alias's daemon is dead, spawn a new one and wait until alive.
+
+    Bridge-owned sessions (a user-opened claude window with cca-msg attached,
+    no daemon): never stack a daemon on a live bridge — two consumers would
+    race on the same inbox. Serviceable only if the chats-loop marker exists;
+    a live bridge process alone just means the MCP server is attached, not
+    that anyone is polling the inbox (docs/ROUTING.md "终端 chats-loop 会话").
+    """
     m = sx.load_meta_for(alias) or {}
     pid = m.get("daemon_pid")
     if pid and _pid_alive(pid):
         return True
+
+    bridge_pid = m.get("bridge_pid")
+    if bridge_pid and _pid_alive(bridge_pid):
+        return loop_marker_fresh(alias)
 
     cwd = m.get("cwd") or _HISTORICAL_CWD
     log.info("ensure[%s]: daemon pid=%s dead, respawning at cwd=%s", alias, pid, cwd)

@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 
 from .config import get_workspace_roots
-from .paths import ALIAS_RE, SESSIONS_ROOT
+from .paths import ALIAS_RE, SESSIONS_ROOT, loop_marker_fresh
 from .pid_track import _pid_alive
 
 
@@ -47,7 +47,16 @@ def list_projects() -> list[dict]:
             except Exception:
                 continue
             daemon_pid = m.get("daemon_pid")
-            online = bool(daemon_pid) and _pid_alive(daemon_pid)
+            bridge_pid = m.get("bridge_pid")
+            # bridge 活只说明 MCP 挂着；真在收件要看 marker 新鲜度（docs/ROUTING.md）
+            online = (bool(daemon_pid) and _pid_alive(daemon_pid)) or (
+                bool(bridge_pid) and _pid_alive(bridge_pid)
+                and loop_marker_fresh(entry.name)
+            )
+            # 同 cwd 多个 session：在线者优先占坑，不被后扫到的离线者覆盖
+            prev = alias_by_cwd.get(key)
+            if prev and prev["online"] and not online:
+                continue
             alias_by_cwd[key] = {
                 "alias": entry.name,
                 "online": online,
