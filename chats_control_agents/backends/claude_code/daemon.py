@@ -59,7 +59,7 @@ _NOISE_REGEXES = (
     re.compile(r"ctx:\d+%.*\$0\.\d+.*5h:\d+%.*7d:\d+%", re.IGNORECASE),
     re.compile(r"\$0\.\d+.*5h:\d+%.*7d:\d+%", re.IGNORECASE),
     re.compile(r"^[a-z0-9_-]+@desktop-", re.IGNORECASE),
-    re.compile(r"^[✻✶✢✽·*]+[a-z]{3,30}(?:\.{3}|…)"),
+    re.compile(r"^[✻✶✢✽·*]*[a-z]{3,30}(?:\.{3}|…)[\d\s]*(?:\(.*\))?$", re.IGNORECASE),
 )
 
 _MENU_NUMBERED_LINE = re.compile(r"^\s*[❯>]?\s*\d+[.):、]\s+\S")
@@ -173,7 +173,18 @@ def main() -> int:
         print(f"ERROR: claude.exe not found at {CLAUDE_BIN}", file=sys.stderr)
         return 2
 
-    spawn_cwd = lc.resolve_spawn_cwd(CWD_ARG, ALIAS, backend_default=_HISTORICAL_CWD)
+    try:
+        spawn_cwd = lc.resolve_spawn_cwd(CWD_ARG, ALIAS)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        from chats_control_agents.core.paths import outbox_path
+        try:
+            p = outbox_path(ALIAS)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(f"⚠️ 项目目录不存在，无法启动。请用 /new 重新创建会话。\n{e}\n", encoding="utf-8")
+        except Exception:
+            pass
+        return 3
     ctx = lc.init_lifecycle(alias=ALIAS, cwd=spawn_cwd, backend="claude_code")
     log = ctx.log
     log.info("claude=%s trigger=%r settle=%ds", CLAUDE_BIN, TRIGGER_COMMAND, READY_SETTLE_SECS)
@@ -224,12 +235,10 @@ def main() -> int:
         text = block.strip()
         if not text:
             return
-        is_menu = _looks_like_menu(text.splitlines())
-        if is_menu:
-            extra = "\n8 auto wake loop\n9 send ESC\nreply digits like 234"
-            payload = f"{text}\n{extra}"
-        else:
-            payload = text
+        if not _looks_like_menu(text.splitlines()):
+            return
+        extra = "\n8 auto wake loop\n9 send ESC\nreply digits like 234"
+        payload = f"{text}\n{extra}"
         key = _dedup_key(payload)
         if key == _dedup_key(last_menu_payload):
             return
@@ -239,8 +248,7 @@ def main() -> int:
             outbox_path.write_text(f"[{stamp}]\n{payload}\n", encoding="utf-8")
         except Exception:
             pass
-        if is_menu:
-            set_control_mode(True)
+        set_control_mode(True)
 
     def wake_loop() -> None:
         nonlocal last_auto_wake_at

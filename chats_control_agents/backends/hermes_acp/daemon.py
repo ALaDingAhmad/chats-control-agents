@@ -190,8 +190,18 @@ async def _main_async(log: logging.Logger, ctx: lc.DaemonContext) -> int:
 
 
 def main() -> int:
-    # 决定 spawn cwd（CLI > meta 历史 > $HOME）
-    spawn_cwd = lc.resolve_spawn_cwd(CWD_ARG, ALIAS, backend_default=Path.home())
+    try:
+        spawn_cwd = lc.resolve_spawn_cwd(CWD_ARG, ALIAS)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        from chats_control_agents.core.paths import outbox_path
+        try:
+            p = outbox_path(ALIAS)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(f"⚠️ 项目目录不存在，无法启动。请用 /new 重新创建会话。\n{e}\n", encoding="utf-8")
+        except Exception:
+            pass
+        return 3
 
     # 装日志 / session_dir / 初始 meta
     ctx = lc.init_lifecycle(alias=ALIAS, cwd=spawn_cwd, backend="hermes_acp")

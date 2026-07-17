@@ -80,23 +80,27 @@ def resolve_spawn_cwd(
 ) -> str:
     """决定下游子进程的 cwd。
 
-    优先级：CLI 参数 > meta.json 历史保存的 cwd > backend 默认 > $HOME 兜底。
-
-    backend_default 是每个 backend 自己的兜底值（claude_code 历史用
-    claude-code-account-switch，hermes_acp 用 $HOME 即可）。
+    优先级：CLI 参数 > meta.json 历史保存的 cwd。
+    都无效时抛 ValueError，让调用方处理（写 outbox 通知用户目录不存在）。
     """
-    if cli_cwd and Path(cli_cwd).is_dir():
-        return cli_cwd
+    tried: list[str] = []
+    if cli_cwd:
+        if Path(cli_cwd).is_dir():
+            return cli_cwd
+        tried.append(cli_cwd)
 
     prev = load_meta_for(alias) or {}
     prev_cwd = prev.get("cwd")
-    if prev_cwd and Path(prev_cwd).is_dir():
-        return prev_cwd
+    if prev_cwd and prev_cwd not in tried:
+        if Path(prev_cwd).is_dir():
+            return prev_cwd
+        tried.append(prev_cwd)
 
-    if backend_default and Path(backend_default).is_dir():
-        return str(backend_default)
-
-    return str(Path.home())
+    raise ValueError(
+        f"session {alias!r}: project directory not found. "
+        f"Tried: {', '.join(tried) or '(none)'}. "
+        f"Fix meta.json cwd or re-create the session."
+    )
 
 
 # ── 生命周期上下文 ────────────────────────────────────────────────────────
