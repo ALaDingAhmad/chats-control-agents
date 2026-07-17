@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from datetime import datetime
@@ -145,6 +146,33 @@ def _current_wait_seconds() -> int:
     return BASE_WAIT_SECONDS * (2 ** _consecutive_timeouts)
 
 
+# ── Busy heartbeat ────────────────────────────────────────────────────────
+# "处理中也算在服务"：wait_for_message 返回真消息后、模型执行任务期间，
+# bridge 进程本身是闲的，没人 touch marker——180s 后路由层会误判"没人收件"
+# 把追发的消息吞成 /proj 菜单（docs/入站路由.md "信号源"节，07-17 实测）。
+# 后台线程在 busy 期间代打心跳；上限 BUSY_MAX_SECS 防模型挂死永远显示在线。
+BUSY_MAX_SECS = 30 * 60
+_busy_since: float | None = None  # None = 不在处理中；写读均单赋值，无需锁
+
+
+def _busy_heartbeat_loop() -> None:
+    while True:
+        time.sleep(5.0)
+        since = _busy_since
+        if since is None:
+            continue
+        if time.time() - since > BUSY_MAX_SECS:
+            continue  # 模型挂死保护：停止续约，让租约自然过期
+        try:
+            MARKER.touch(exist_ok=True)
+        except Exception:
+            pass
+
+
+threading.Thread(target=_busy_heartbeat_loop, daemon=True, name="busy-heartbeat").start()
+
+
+
 @mcp.tool()
 def relay_init(alias: str) -> str:
     """
@@ -179,7 +207,8 @@ def wait_for_message(timeout_seconds: int = 0) -> str:
     Just call this again after any TIMEOUT — the loop never ends until the
     user explicitly stops it.
     """
-    global _consecutive_timeouts
+    global _consecutive_timeouts, _busy_since
+    _busy_since = None  # 回到等待态，wait 自己的心跳接管
     wait_secs = _current_wait_seconds()
     # Mark relay-active so the global Stop hook knows to mirror terminal text
     # back to the web UI for this session.
@@ -216,6 +245,7 @@ def wait_for_message(timeout_seconds: int = 0) -> str:
                 log.info("  got msg %d chars: %r", len(text), text[:200])
                 INBOX.write_text("", encoding="utf-8")
                 _consecutive_timeouts = 0  # active user → reset backoff
+                _busy_since = time.time()  # 处理中：后台线程代打心跳
                 return text
         time.sleep(poll_interval)
 

@@ -144,7 +144,15 @@ async def route_inbound(text: str, source: str) -> RouteOutcome:
     p = inbox_path(alias)
     p.parent.mkdir(parents=True, exist_ok=True)
     try:
-        p.write_text(text, encoding="utf-8")
+        # 追加而非覆写：后端处理中时多条入站排队积压，下轮 wait 一次取走。
+        # 覆写语义会让"处理期间连发两条"只活最后一条（docs/入站路由.md 第 6 步）。
+        pending = ""
+        if p.exists():
+            try:
+                pending = p.read_text(encoding="utf-8").strip()
+            except Exception:
+                pending = ""
+        p.write_text(f"{pending}\n{text}" if pending else text, encoding="utf-8")
     except Exception as e:
         log.warning("inbox write failed for %s: %s", alias, e)
         return RouteOutcome(reply="⚠️ 内部错误：消息无法写入会话。", alias=alias)
