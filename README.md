@@ -53,6 +53,7 @@ python -m chats_control_agents.backends.claude_code.daemon [<alias>] [<cwd>]
 | `/use <alias>`   | 切到指定会话                                        |
 | `/new`           | 同 `/proj` — 列项目；回 0 开空会话，回数字开 / 切项目 |
 | `/end <alias>`   | 结束会话（60s 内再发一次确认）                       |
+| `/stop`          | 中断当前会话正在执行的任务（向 child claude 发 ESC） |
 | `/rename <new>`  | 重命名当前会话（仅离线时）                          |
 | `/help`          | 帮助                                                |
 | `//xxx`          | 把 `/xxx` 透传给 AI agent                           |

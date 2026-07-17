@@ -21,7 +21,7 @@ from pathlib import Path
 
 from .autospawn import request_autospawn
 from .config import get_workspace_roots
-from .paths import ALIAS_RE, session_dir
+from .paths import ALIAS_RE, control_path, session_dir
 from .pid_track import _kill_pid, _pid_alive
 from .proj_choices import (
     PROJ_PICK_WINDOW_SECS,
@@ -103,6 +103,8 @@ def handle_command(text: str) -> str:
         if not args:
             return "用法：/end <alias>（需要在 60s 内再发一次确认）"
         return _cmd_end(args[0])
+    if cmd == "stop":
+        return _cmd_stop()
     if cmd == "rename":
         if not args:
             return "用法：/rename <new-alias>"
@@ -123,6 +125,7 @@ def _help_text() -> str:
         "/use 「alias」— 切到指定会话\n"
         "/new — 同 /proj（列项目，回 0 开空会话，回数字开/切项目）\n"
         "/end 「alias」— 结束会话（60s 内再发一次确认）\n"
+        "/stop — 中断当前会话正在执行的任务（发 ESC）\n"
         "/rename 「new」— 重命名当前会话\n"
         "/backend — 看/切默认 AI 后端（用于之后新建的会话）\n"
         "/help — 显示本帮助\n"
@@ -348,6 +351,40 @@ def _cmd_end(alias: str) -> str:
     if _kill_pid(daemon_pid):
         return f"已结束 {alias!r}（daemon pid={daemon_pid}）。会话目录保留。"
     return f"杀 daemon pid={daemon_pid} 失败。"
+
+
+# ── /stop ────────────────────────────────────────────────────────────────
+def _cmd_stop() -> str:
+    """中断当前会话正在执行的任务。
+
+    daemon-managed 会话：写 control_path = "9"，daemon 既有逻辑发 ESC 给
+    child claude（docs/入站路由.md "/stop 命令随时可用"段）。显式命令不受
+    裸数字的 one-shot arm 限制。bridge-owned（用户自己终端里的 chats-loop）
+    远程中断不了——模型推理无法从信箱层抢占，只能在那个终端按 ESC。
+    """
+    alias = get_current()
+    if not alias:
+        return "当前没有活跃会话，没有可中断的任务。"
+    m = load_meta_for(alias) or {}
+    daemon_pid = m.get("daemon_pid")
+    if daemon_pid and _pid_alive(daemon_pid):
+        p = control_path(alias)
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("9", encoding="utf-8")
+        except Exception as e:
+            return f"⚠️ 中断信号写入失败：{e}"
+        return (
+            f"已向会话 {alias!r} 发送中断（ESC），daemon 执行后会回执 sent ESC。\n"
+            "任务停止后发下一条消息继续。"
+        )
+    bridge_pid = m.get("bridge_pid")
+    if bridge_pid and _pid_alive(bridge_pid):
+        return (
+            f"会话 {alias!r} 跑在你本机的终端 claude 里（chats-loop），"
+            "远程中断不了——到那个终端窗口按 ESC。"
+        )
+    return f"会话 {alias!r} 不在线，没有正在执行的任务。"
 
 
 # ── /rename ──────────────────────────────────────────────────────────────
