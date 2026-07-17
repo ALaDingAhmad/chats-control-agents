@@ -100,7 +100,11 @@ def install_mcp(dry: bool) -> None:
         raise SystemExit(f"ERROR: mcp_bridge.py not found at {MCP_BRIDGE_ABS_PATH}")
     desired = {
         "type": "stdio",
-        "command": "python",
+        # 绝对路径而非裸 "python"：裸命令按启动 claude 的 shell 的 PATH 解析，
+        # 在激活 venv 的终端里会被劫持到没装 mcp/psutil 的解释器，bridge 秒崩
+        # （-32000 且无日志）。sys.executable = 跑本安装脚本的 python，跨平台。
+        # 换机器/升级 python 后重跑 `install.py --mcp` 即可刷新。
+        "command": sys.executable,
         "args": [str(MCP_BRIDGE_ABS_PATH).replace("\\", "/")],
         "env": {},
     }
