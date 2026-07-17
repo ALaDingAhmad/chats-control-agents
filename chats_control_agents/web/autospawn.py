@@ -88,7 +88,7 @@ async def autospawn_worker():
                 if pid:
                     _autospawn_pids[alias] = pid
                     # Notify the user when chats-loop skill actually activates.
-                    # See docs/ROUTING.md "就绪通知".
+                    # See docs/入站路由.md "就绪通知".
                     asyncio.create_task(watch_ready(alias, pid))
     except asyncio.CancelledError:
         log.info("autospawn worker cancelled")

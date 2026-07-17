@@ -54,7 +54,7 @@ def _ensure_meta(alias: str, session_dir: Path) -> None:
     Registration only — NEVER touches _current.txt. Becoming the current
     session requires an explicit user pick (/proj, /use, dashboard); a bridge
     that grabs routing on startup hijacks all inbound the moment any claude
-    window opens (docs/ROUTING.md "终端 chats-loop 会话").
+    window opens (docs/入站路由.md "终端 chats-loop 会话").
     """
     meta_file = session_dir / "meta.json"
     bridge_info: dict = {"bridge_pid": os.getpid()}

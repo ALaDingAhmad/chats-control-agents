@@ -256,7 +256,7 @@ def list_sessions() -> list[dict]:
                 pass  # 写盘失败不阻塞列表渲染——下次扫描再尝试
         daemon_pid = m.get("daemon_pid")
         bridge_pid = m.get("bridge_pid")
-        # bridge 活只说明 MCP 挂着；真在收件要看 marker 新鲜度（docs/ROUTING.md）
+        # bridge 活只说明 MCP 挂着；真在收件要看 marker 新鲜度（docs/入站路由.md）
         online = (bool(daemon_pid) and _pid_alive(daemon_pid)) or (
             bool(bridge_pid) and _pid_alive(bridge_pid) and loop_marker_fresh(alias)
         )

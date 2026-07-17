@@ -66,18 +66,18 @@ chats_control_agents/
 ├── backends/     AI 适配器（claude_code；未来 openclaw、hermes、…）
 └── web/          Starlette HTTP 层
 docs/
-├── ARCHITECTURE.md    总览：数据流 + 模块表 + 会话模型
-├── ROUTING.md         入站路由契约（RouteOutcome、idle gate）
-├── DAEMON-LIFECYCLE.md claude_code daemon 生命周期 + 弹窗处理
-├── ADD_CHANNEL.md     加新渠道的步骤
-└── ADD_BACKEND.md     加新后端的步骤
+├── 架构.md    总览：数据流 + 模块表 + 会话模型
+├── 入站路由.md         入站路由契约（RouteOutcome、idle gate）
+├── daemon生命周期.md claude_code daemon 生命周期 + 弹窗处理
+├── 新增渠道.md     加新渠道的步骤
+└── 新增后端.md     加新后端的步骤
 scripts/
 ├── start_web_detached.py       后台起 web_server（关终端不影响）
 ├── stop_web.py                 停掉 detached 起的 web_server
 └── kill_daemon_children.py     安全杀掉所有后端 spawn 的进程
 ```
 
-数据流图和模块表见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
+数据流图和模块表见 [`docs/架构.md`](docs/架构.md)。
 
 ## 起源
 

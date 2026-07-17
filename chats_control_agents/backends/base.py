@@ -15,7 +15,7 @@ This base class is intentionally loose — claude_code today is process-typed
 backend might be API-typed (stateless HTTP). The interface accommodates
 both: `send` takes the session and the message, and returns when the agent
 has replied. How that happens — file IO, HTTP call, RPC — is the backend's
-secret. See docs/ADD_BACKEND.md.
+secret. See docs/新增后端.md.
 """
 from __future__ import annotations
 

@@ -11,7 +11,7 @@ data/<channel-name>_state/ so a process restart resumes cleanly.
 
 This base class is intentionally loose — we're not forcing the existing
 weixin channel to adopt it immediately. It documents the contract any new
-channel should follow. See docs/ADD_CHANNEL.md for a step-by-step.
+channel should follow. See docs/新增渠道.md for a step-by-step.
 """
 from __future__ import annotations
 

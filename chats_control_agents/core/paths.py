@@ -81,7 +81,7 @@ def control_mode_path(alias: str) -> Path:
 def loop_marker_path(alias: str) -> Path:
     """chats-loop 激活 marker：mcp_bridge 在 wait_for_message 期间心跳 touch，
     进程退出时删。"出现" = skill 已激活（watch_ready 用）；"当前在收件"
-    要看 mtime 新鲜度，用 loop_marker_fresh()（docs/ROUTING.md "就绪通知/信号源"）。"""
+    要看 mtime 新鲜度，用 loop_marker_fresh()（docs/入站路由.md "就绪通知/信号源"）。"""
     return Path.home() / ".claude" / f".chats-loop-active-{alias}"
 
 

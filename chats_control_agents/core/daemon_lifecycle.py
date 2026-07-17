@@ -12,7 +12,7 @@
 所以抽出来公共调用。剩下的事（怎么 spawn、怎么知道下游 ready、怎么处理
 下游异常、消息流转）由 backend 自己的 daemon 写，本模块不插手。
 
-设计原则见 `docs/BACKEND-DESIGN.md`。
+设计原则见 `docs/后端设计.md`。
 """
 from __future__ import annotations
 

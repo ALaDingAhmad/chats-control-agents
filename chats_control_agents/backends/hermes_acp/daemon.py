@@ -20,7 +20,7 @@ daemon **在消息路径上**（"路径内"型 backend，对比 claude_code 的"
      给用户发"会话已就绪"通知
   7. 进入主循环：poll inbox.txt，新内容 → AcpClient.prompt → 拿 turn 结果 → 写 outbox.txt
 
-设计说明见 `docs/BACKEND-DESIGN.md` 和 `docs/HERMES-ACP-SPIKE.md`。
+设计说明见 `docs/后端设计.md` 和 `docs/HERMES-ACP预研.md`。
 """
 from __future__ import annotations
 

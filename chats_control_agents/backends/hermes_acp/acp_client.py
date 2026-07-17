@@ -5,7 +5,7 @@ newline-delimited JSON 帧、聚合 `session/update` 事件、自动批 `session
 跟 chat_sessions 文件协议、生命周期、inbox/outbox 全部解耦。
 
 设计依据：`scripts/spike_acp_raw.py`（实测验证过的蓝本），具体协议事实
-见 `docs/HERMES-ACP-SPIKE.md`。
+见 `docs/HERMES-ACP预研.md`。
 """
 from __future__ import annotations
 

@@ -127,7 +127,7 @@ async def ensure_daemon_alive(alias: str) -> bool:
     no daemon): never stack a daemon on a live bridge — two consumers would
     race on the same inbox. Serviceable only if the chats-loop marker exists;
     a live bridge process alone just means the MCP server is attached, not
-    that anyone is polling the inbox (docs/ROUTING.md "终端 chats-loop 会话").
+    that anyone is polling the inbox (docs/入站路由.md "终端 chats-loop 会话").
     """
     m = sx.load_meta_for(alias) or {}
     pid = m.get("daemon_pid")

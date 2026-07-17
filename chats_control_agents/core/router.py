@@ -66,7 +66,7 @@ class RouteOutcome:
 
 
 async def route_inbound(text: str, source: str) -> RouteOutcome:
-    # ── one-shot menu arming, consumed THIS turn (see docs/ROUTING.md) ──
+    # ── one-shot menu arming, consumed THIS turn (see docs/入站路由.md) ──
     # Read+delete the pty arm and snapshot the proj arm before any dispatch,
     # so a bare digit counts as a menu pick only in the turn right after the
     # menu showed up; otherwise it falls through to chat.
@@ -116,7 +116,7 @@ async def route_inbound(text: str, source: str) -> RouteOutcome:
         )
         return RouteOutcome(reply=prompt, alias=alias)
 
-    # ── 执行端可服务性（docs/ROUTING.md 决策顺序第 5 步）──
+    # ── 执行端可服务性（docs/入站路由.md 决策顺序第 5 步）──
     # bridge-owned 会话（daemon 不活但 bridge 活）：不许叠 daemon；只有
     # chats-loop marker 在（循环真在收件）才投递，否则回菜单让用户显式选。
     meta = sx.load_meta_for(alias) or {}
