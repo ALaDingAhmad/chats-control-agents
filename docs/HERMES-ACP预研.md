@@ -54,6 +54,7 @@ session/request_permission: N  (工具审批)
 ```
 
 落到 agent-bridge 的 outbox.txt 模型时：
+
 - 只把 `agent_message_chunk` 累积成"最终回复"。
 - 思考流 / 工具调用进度先**不**进 outbox（outbox 是"最新一条待推送的回复"，不是流）。
 - 工具审批一律 auto-allow（用户在 IM 里没法点对话框）。
@@ -73,15 +74,15 @@ session/request_permission: N  (工具审批)
 
 ## 跟 claude_code backend 对比
 
-| 维度 | claude_code | hermes_acp |
-|---|---|---|
-| 进程拓扑 | 1 alias = 4 进程 | N alias 共享 1 子进程 |
-| 启动时间 | ~10s (TUI 加载 + 触发 chats-loop) | 首次 ~80s，后续 ~1s |
-| 输出捕获 | PTY 字节流 + ANSI 剥离 | 结构化 JSON-RPC 事件 |
-| 工具控制 | child claude 自决 | hermes 自决（自带 terminal/code/web tools） |
-| 多模态输入 | 不支持（PTY 没法粘图） | 原生 ImageContentBlock |
-| 限额自恢复 | daemon 监控 PTY + auto press 3 | 没做，待补（hermes 自己有 usage_update 可观察） |
-| 跨 session 隔离 | 进程级隔离（最强） | sessionId 隔离（hermes 内部状态） |
+| 维度            | claude_code                       | hermes_acp                                      |
+| --------------- | --------------------------------- | ----------------------------------------------- |
+| 进程拓扑        | 1 alias = 4 进程                  | N alias 共享 1 子进程                           |
+| 启动时间        | ~10s (TUI 加载 + 触发 chats-loop) | 首次 ~80s，后续 ~1s                             |
+| 输出捕获        | PTY 字节流 + ANSI 剥离            | 结构化 JSON-RPC 事件                            |
+| 工具控制        | child claude 自决                 | hermes 自决（自带 terminal/code/web tools）     |
+| 多模态输入      | 不支持（PTY 没法粘图）            | 原生 ImageContentBlock                          |
+| 限额自恢复      | daemon 监控 PTY + auto press 3    | 没做，待补（hermes 自己有 usage_update 可观察） |
+| 跨 session 隔离 | 进程级隔离（最强）                | sessionId 隔离（hermes 内部状态）               |
 
 ## 下一步
 

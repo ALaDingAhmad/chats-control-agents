@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "wxchan": {
+      "command": "node",
+      "args": ["D:/aiproject/agent-bridge/spikes/channels/wxchan.mjs"]
+    }
+  }
+}
