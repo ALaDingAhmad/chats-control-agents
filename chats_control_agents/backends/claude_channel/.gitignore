@@ -1,0 +1,6 @@
+# node 依赖不入库——package.json + package-lock.json 锁版本，用时 npm install 重建
+node_modules/
+# Python 缓存
+__pycache__/
+# daemon 运行时在 session 目录生成，不在这里；但保险起见排除本地临时产物
+*.log

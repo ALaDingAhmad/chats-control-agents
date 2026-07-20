@@ -36,7 +36,7 @@ from .pid_track import _pid_alive
 
 
 # 已知 backend 集合（跟 core.spawn._BACKEND_DAEMON_MODULES 一致）
-KNOWN_BACKENDS = ("claude_code", "hermes_acp")
+KNOWN_BACKENDS = ("claude_code", "hermes_acp", "claude_channel")
 _BACKEND_NAME_RE = _re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 
 

@@ -66,6 +66,7 @@ async def watch_ready(alias: str, daemon_pid: int) -> None:
 _BACKEND_DAEMON_MODULES = {
     "claude_code": "chats_control_agents.backends.claude_code.daemon",
     "hermes_acp": "chats_control_agents.backends.hermes_acp.daemon",
+    "claude_channel": "chats_control_agents.backends.claude_channel.daemon",
 }
 
 

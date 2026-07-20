@@ -16,7 +16,7 @@ from ..core.spawn import ensure_daemon_alive, spawn_daemon_detached  # noqa: F40
 
 log = logging.getLogger("web.spawn")
 
-_KNOWN_BACKENDS = {"claude_code", "hermes_acp"}
+_KNOWN_BACKENDS = {"claude_code", "hermes_acp", "claude_channel"}
 
 _spawn_daemon_detached = spawn_daemon_detached
 

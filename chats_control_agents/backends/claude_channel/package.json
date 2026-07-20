@@ -1,0 +1,11 @@
+{
+  "name": "claude-channel-server",
+  "version": "1.0.0",
+  "description": "agent-bridge claude_channel backend — MCP channel protocol converter",
+  "private": true,
+  "type": "module",
+  "main": "channel_server.mjs",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  }
+}
