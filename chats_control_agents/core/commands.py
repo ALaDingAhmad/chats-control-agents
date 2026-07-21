@@ -30,6 +30,13 @@ from .proj_choices import (
     write_proj_choices,
 )
 from .projects import list_projects
+from .resume_choices import (
+    RESUME_PICK_WINDOW_SECS,
+    read_resume_choices,
+    resume_choices_active,
+    write_resume_choices,
+)
+from .resume_scan import list_recent_sessions
 from .sessions import (
     KNOWN_BACKENDS,
     create_session_dir,
@@ -61,7 +68,7 @@ def is_command(text: str) -> bool:
         return False
     if t.startswith("/"):
         return True
-    if t.isdigit() and proj_choices_active():
+    if t.isdigit() and (resume_choices_active() or proj_choices_active()):
         return True
     return False
 
@@ -77,6 +84,11 @@ def strip_passthrough_prefix(text: str) -> str:
 
 def handle_command(text: str) -> str:
     text = text.strip()
+    # Bare integer: second-level resume session pick takes priority over the
+    # first-level /proj project pick (the resume menu is armed *after* a project
+    # was chosen, so if both are somehow active the newer one wins).
+    if text.isdigit() and resume_choices_active():
+        return _cmd_pick_resume(int(text))
     # Bare integer in active /proj selection window → pick that project
     if text.isdigit() and proj_choices_active():
         return _cmd_pick_proj(int(text))
@@ -98,7 +110,7 @@ def handle_command(text: str) -> str:
             return "用法：/use <alias>"
         return _cmd_use(args[0])
     if cmd == "new":
-        return _cmd_proj([])
+        return _cmd_proj([], for_new=True)
     if cmd == "end":
         if not args:
             return "用法：/end <alias>（需要在 60s 内再发一次确认）"
@@ -120,10 +132,10 @@ def _help_text() -> str:
     # the browser render newlines correctly; we treat PC WeChat as known-bad.
     return (
         "可用命令：\n"
-        "/proj [关键词] — 列出项目（可搜索，回复编号切换/启动）\n"
+        "/proj [关键词] — 列项目→选项目→接回该项目历史会话（默认恢复上下文）\n"
         "/list — 列出所有会话\n"
         "/use 「alias」— 切到指定会话\n"
-        "/new — 同 /proj（列项目，回 0 开空会话，回数字开/切项目）\n"
+        "/new — 列项目→开全新会话（不接回历史；回 0 开空会话）\n"
         "/end 「alias」— 结束会话（60s 内再发一次确认）\n"
         "/stop — 中断当前会话正在执行的任务（发 ESC）\n"
         "/rename 「new」— 重命名当前会话\n"
@@ -161,13 +173,17 @@ def _cmd_list() -> str:
 
 
 # ── /proj ────────────────────────────────────────────────────────────────
-def _cmd_proj(args: list[str]) -> str:
+def _cmd_proj(args: list[str], *, for_new: bool = False) -> str:
     """List projects across all workspace_roots. Paged.
 
     Usage:
         /proj          page 1
         /proj 2        page N
         /proj more     next page after last shown
+
+    for_new: set by /new. When True, picking a project skips the resume menu
+    and starts a fresh session (see _cmd_pick_proj). /proj (for_new=False) is
+    the resume-by-default path.
     """
     roots = get_workspace_roots()
     if not roots:
@@ -183,8 +199,10 @@ def _cmd_proj(args: list[str]) -> str:
     if args:
         a = args[0].lower()
         if a == "more":
-            last_page = (read_proj_choices() or {}).get("page", 1)
-            page = last_page + 1
+            prev = read_proj_choices() or {}
+            page = prev.get("page", 1) + 1
+            # 分页重入：继承上一次的 for_new，别让翻页把 /new 语义丢了
+            for_new = for_new or bool(prev.get("for_new"))
         elif a.isdigit():
             page = max(1, int(a))
         else:
@@ -218,12 +236,17 @@ def _cmd_proj(args: list[str]) -> str:
         lines.append(f"{i}. {p['name']} [{tag}]")
     if page < pages:
         lines.append(f"回复 /proj more 看下一页（剩 {total - end} 个）")
-    lines.append("回复编号切换；未运行的项目会自动启动 daemon。")
-    lines.append("回复 0 开空会话（cwd=用户主目录，不绑任何项目）。")
+    if for_new:
+        lines.append("回复编号开全新会话（不接回历史）；未运行的会自动启动 daemon。")
+        lines.append("回复 0 开空会话（cwd=用户主目录，不绑任何项目）。")
+    else:
+        lines.append("回复编号 → 选该项目要接回的历史会话。")
+        lines.append("回复 0 开空会话（主目录）。想开全新会话用 /new。")
 
     write_proj_choices({
         "projects": projects,
         "page": page,
+        "for_new": for_new,
         "expires_at": time.time() + PROJ_PICK_WINDOW_SECS,
     })
     return "\n".join(lines)
@@ -232,59 +255,167 @@ def _cmd_proj(args: list[str]) -> str:
 def _cmd_pick_proj(n: int) -> str:
     """Pick project #n from the most recent /proj listing.
 
-    n == 0 is a special-case "blank session": cwd defaults to the user's
-    home directory, no project association. Useful when the user is past
-    the idle gate but doesn't want any of the listed projects.
+    Semantics (2026-07-21, resume 默认化): picking a project no longer starts a
+    session directly. If the default backend is claude_channel AND the project's
+    cwd has claude transcript history, we arm the second-level resume menu (see
+    _enter_resume_menu). Otherwise we fall back to the old behaviour: start /
+    switch a session straight away (_start_session_for_cwd).
+
+    n == 0 is a special-case "blank session": cwd = user's home directory, no
+    project association.
     """
     choices = read_proj_choices() or {}
     projects: list[dict] = choices.get("projects") or []
+    for_new = bool(choices.get("for_new"))
     if not projects:
         return "没有可选项目。先发 /proj 看列表。"
 
     if n == 0:
-        from .sessions import make_alias_for_cwd
         home_cwd = str(Path.home())
-        alias = make_alias_for_cwd(home_cwd)
-        # 默认 backend 由 /backend 命令调整（缺省 claude_code），所有命令行
-        # 入口新建会话都用这个值——避免每个建会话点散在多处硬编码
-        create_session_dir(alias, home_cwd, backend=get_default_backend())
-        try:
-            set_current(alias)
-        except Exception:
-            pass
-        request_autospawn(alias, home_cwd)
         write_proj_choices(None)
-        return (
-            f"已开空会话 {alias}（cwd={home_cwd}），"
-            f"正在自动启动 daemon（约 10 秒就绪）。"
-        )
+        return _resume_or_start(home_cwd, blank=True, for_new=for_new)
 
     if n < 1 or n > len(projects):
         return f"编号 {n} 越界（共 {len(projects)} 个）。再发 /proj 看列表。"
     p = projects[n - 1]
+    write_proj_choices(None)
+    return _resume_or_start(p["abs_path"], project=p, for_new=for_new)
 
-    # Already wired-up project
-    if p["alias"]:
-        if p["online"]:
-            try:
-                set_current(p["alias"])
-                write_proj_choices(None)
-                return f"已切到 {p['alias']}（{p['abs_path']}）。"
-            except ValueError as e:
-                return f"切换失败：{e}"
+
+def _resume_or_start(cwd: str, *, project: dict | None = None, blank: bool = False,
+                     for_new: bool = False) -> str:
+    """Route a chosen project cwd to either the resume menu or a fresh start.
+
+    Resume is only wired for claude_channel (only its daemon understands the
+    RESUME: control signal — see docs/后端设计.md). Skip the resume menu when:
+      - for_new (the pick came from /new — user explicitly wants a fresh start), or
+      - the default backend isn't claude_channel, or
+      - the cwd has no transcript history.
+    """
+    if not for_new and get_default_backend() == "claude_channel":
+        sessions = list_recent_sessions(cwd)
+        if sessions:
+            return _enter_resume_menu(cwd, sessions, project=project, blank=blank)
+    # No resume path → start/switch a session straight away (old behaviour).
+    return _start_session_for_cwd(cwd, project=project, blank=blank)
+
+
+def _enter_resume_menu(cwd: str, sessions: list[dict], *, project: dict | None, blank: bool) -> str:
+    """Arm the second-level resume menu and render it for the phone.
+
+    Each row = time + first-human-message summary. Replying with a bare integer
+    picks a session to --resume (handled by _cmd_pick_resume).
+    """
+    label = "空会话（主目录）" if blank else (project or {}).get("name", cwd)
+    lines = [f"「{label}」最近的会话（回复编号接回上下文）："]
+    for i, s in enumerate(sessions, 1):
+        ts = time.strftime("%m-%d %H:%M", time.localtime(s["mtime"]))
+        lines.append(f"{i}. {ts} · {s['summary']}")
+    lines.append("回复 0 开全新会话（不接回历史）。")
+
+    write_resume_choices({
+        "cwd": cwd,
+        "sessions": sessions,
+        "project": project,
+        "blank": blank,
+        "expires_at": time.time() + RESUME_PICK_WINDOW_SECS,
+    })
+    return "\n".join(lines)
+
+
+def _cmd_pick_resume(n: int) -> str:
+    """Pick session #n from the resume menu → --resume into it.
+
+    n == 0 means "skip resume, start a fresh session" (the menu's escape hatch).
+    """
+    choices = read_resume_choices() or {}
+    sessions: list[dict] = choices.get("sessions") or []
+    cwd: str = choices.get("cwd") or str(Path.home())
+    project = choices.get("project")
+    blank = bool(choices.get("blank"))
+    if not sessions:
+        return "没有可选会话。先发 /proj 选项目。"
+
+    if n == 0:
+        write_resume_choices(None)
+        return _start_session_for_cwd(cwd, project=project, blank=blank)
+
+    if n < 1 or n > len(sessions):
+        return f"编号 {n} 越界（共 {len(sessions)} 个）。再发 /proj 重来。"
+    sess = sessions[n - 1]
+    session_id = sess["session_id"]
+    write_resume_choices(None)
+
+    # Start/switch a claude_channel session for this cwd, then hand the daemon
+    # the RESUME: control signal so it kills the fresh child and re-spawns with
+    # --resume <session_id> (see docs/后端设计.md "resume 控制通路").
+    reply = _start_session_for_cwd(cwd, project=project, blank=blank, silent=True)
+    alias = get_current() or ""
+    if not alias:
+        return "起会话失败，无法接回。再发 /proj 重来。"
+    try:
+        control_path(alias).write_text(f"RESUME:{session_id}", encoding="utf-8")
+    except Exception as e:
+        return f"接回信号写入失败：{e}"
+    ts = time.strftime("%m-%d %H:%M", time.localtime(sess["mtime"]))
+    return (
+        f"正在接回会话（{ts} · {sess['summary']}）到 {alias}，"
+        f"约 10 秒后可继续对话。"
+    )
+
+
+def _start_session_for_cwd(cwd: str, *, project: dict | None = None,
+                           blank: bool = False, silent: bool = False) -> str:
+    """Create/switch a session for a cwd and autospawn its daemon.
+
+    Extracted from the old _cmd_pick_proj body — the three original branches
+    (blank session / existing-alias project / new project) collapse here.
+    `silent=True` suppresses the user-facing reply (used by the resume flow,
+    which appends its own "接回中" message).
+    """
+    from .sessions import make_alias_for_cwd
+
+    if blank:
+        alias = make_alias_for_cwd(cwd)
+        create_session_dir(alias, cwd, backend=get_default_backend())
         try:
-            set_current(p["alias"])
+            set_current(alias)
         except Exception:
             pass
-        request_autospawn(p["alias"], p["abs_path"])
-        write_proj_choices(None)
+        request_autospawn(alias, cwd)
+        if silent:
+            return ""
         return (
-            f"已切到 {p['alias']}（{p['abs_path']}），"
+            f"已开空会话 {alias}（cwd={cwd}），"
+            f"正在自动启动 daemon（约 10 秒就绪）。"
+        )
+
+    # Already wired-up project (has an alias)
+    if project and project.get("alias"):
+        alias = project["alias"]
+        if project.get("online"):
+            try:
+                set_current(alias)
+            except ValueError as e:
+                return f"切换失败：{e}"
+            if silent:
+                return ""
+            return f"已切到 {alias}（{project['abs_path']}）。"
+        try:
+            set_current(alias)
+        except Exception:
+            pass
+        request_autospawn(alias, project["abs_path"])
+        if silent:
+            return ""
+        return (
+            f"已切到 {alias}（{project['abs_path']}），"
             f"daemon 离线，正在自动启动（约 10 秒就绪）。"
         )
 
-    # New project: derive alias from directory basename
-    alias = p["name"]
+    # New project (or blank=False but no wired alias): derive alias from basename
+    base_name = (project or {}).get("name") or Path(cwd).name or "proj"
+    alias = base_name
     if not ALIAS_RE.match(alias):
         alias = re.sub(r"[^a-zA-Z0-9_\-一-鿿]", "_", alias)[:32] or "proj"
     base = alias
@@ -293,22 +424,23 @@ def _cmd_pick_proj(n: int) -> str:
         m = load_meta_for(alias) or {}
         existing_cwd = (m or {}).get("cwd", "")
         try:
-            if existing_cwd and str(Path(existing_cwd).resolve()).lower() == str(Path(p["abs_path"]).resolve()).lower():
+            if existing_cwd and str(Path(existing_cwd).resolve()).lower() == str(Path(cwd).resolve()).lower():
                 break
         except Exception:
             pass
         n_suffix += 1
         alias = f"{base}_{n_suffix}"
 
-    create_session_dir(alias, p["abs_path"], backend=get_default_backend())
+    create_session_dir(alias, cwd, backend=get_default_backend())
     try:
         set_current(alias)
     except Exception:
         pass
-    request_autospawn(alias, p["abs_path"])
-    write_proj_choices(None)
+    request_autospawn(alias, cwd)
+    if silent:
+        return ""
     return (
-        f"已切到 {alias}（{p['abs_path']}），"
+        f"已切到 {alias}（{cwd}），"
         f"正在自动启动 daemon（约 10 秒就绪）。"
     )
 

@@ -29,7 +29,7 @@ from datetime import datetime
 from pathlib import Path
 
 from chats_control_agents.core import daemon_lifecycle as lc
-from chats_control_agents.core.paths import ROOT, inbox_path, outbox_path
+from chats_control_agents.core.paths import ROOT, control_path, inbox_path, outbox_path
 # 复用 claude_code daemon 的 claude.exe 定位（纯函数，无副作用）
 from chats_control_agents.backends.claude_code.daemon import _find_claude_bin
 
@@ -154,6 +154,98 @@ def _inject_health(inject_port: int) -> bool:
         return False
 
 
+def _spawn_and_wait_ready(ctx, log, mcp_config, spawn_cwd, spawn_env, inject_port,
+                          resume_session_id: str | None = None):
+    """Spawn child claude (optionally with --resume) and drive it to ready.
+
+    Encapsulates: build cmd → PtyProcess.spawn → PTY reader thread → confirm the
+    dev-channel warning dialog → wait for channel_server /health. Returns
+    (proc, ok). ok=False means the session never became healthy (caller decides
+    whether to fall back). Each call owns its own reader thread + screen buffer,
+    so resume re-spawns don't tangle with the previous child's I/O.
+
+    resume_session_id: when set, adds `--resume <id>` so claude restores that
+    transcript's context. Verified compatible with the dev-channel flag
+    (docs/后端设计.md "resume 控制通路"); the warning-dialog step is unchanged.
+    """
+    cmd = [str(CLAUDE_BIN), "--mcp-config", str(mcp_config)]
+    if resume_session_id:
+        cmd += ["--resume", resume_session_id]
+    cmd += [
+        "--dangerously-load-development-channels", f"server:{CHANNEL_NAME}",
+        "--dangerously-skip-permissions",
+    ]
+    log.info("spawn cmd%s: %s",
+             " (resume)" if resume_session_id else "", " ".join(cmd))
+    proc = PtyProcess.spawn(cmd, dimensions=(40, 200), cwd=spawn_cwd, env=spawn_env)
+    log.info("spawned claude pid=%s", proc.pid)
+
+    # PTY reader: accumulate screen text for dialog-confirm + ready detection.
+    screen: list[str] = []
+    lock = threading.Lock()
+    pty_log = ctx.session_dir / "pty.log"
+
+    def _reader() -> None:
+        fh = pty_log.open("a", encoding="utf-8")
+        while proc.isalive():
+            try:
+                chunk = proc.read(2048)
+            except EOFError:
+                break
+            except Exception:
+                if not proc.isalive():
+                    break
+                time.sleep(0.1)
+                continue
+            if not chunk:
+                time.sleep(0.05)
+                continue
+            text = _clean(chunk if isinstance(chunk, str) else chunk.decode("utf-8", "replace"))
+            with lock:
+                screen.append(text)
+            try:
+                fh.write(text)
+                fh.flush()
+            except Exception:
+                pass
+        fh.close()
+
+    threading.Thread(target=_reader, daemon=True).start()
+
+    def _screen() -> str:
+        with lock:
+            return "".join(screen)
+
+    # 阶段 1：等 dev-channel 警告框 → 喂 \r 确认选项 1（local development）。
+    warned = False
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        if not proc.isalive():
+            log.error("claude exited before warning dialog")
+            return proc, False
+        if any(m.lower() in _screen().lower().replace(" ", "") for m in _WARNING_MARKERS):
+            log.info("dev-channel warning dialog detected — confirming")
+            proc.write("\r")
+            warned = True
+            time.sleep(2)
+            break
+        time.sleep(0.5)
+    if not warned:
+        log.warning("no dev-channel warning dialog within 20s (continuing)")
+
+    # 阶段 2：等 channel_server /health OK。
+    for _ in range(30):
+        if _inject_health(inject_port):
+            log.info("channel_server /health OK on inject_port=%d", inject_port)
+            return proc, True
+        if not proc.isalive():
+            log.error("claude exited before channel healthy")
+            return proc, False
+        time.sleep(1)
+    log.error("channel_server never became healthy")
+    return proc, False
+
+
 def main() -> int:
     if not CLAUDE_BIN.exists():
         print(f"ERROR: claude.exe not found at {CLAUDE_BIN}", file=sys.stderr)
@@ -192,23 +284,21 @@ def main() -> int:
         "CHANNEL_REPLY_URL": f"http://127.0.0.1:{reply_port}/reply",
         "CHANNEL_NAME": CHANNEL_NAME,
     }
-    cmd = [
-        str(CLAUDE_BIN),
-        "--mcp-config", str(mcp_config),
-        "--dangerously-load-development-channels", f"server:{CHANNEL_NAME}",
-        "--dangerously-skip-permissions",
-    ]
-    log.info("spawn cmd: %s", " ".join(cmd))
-    proc = PtyProcess.spawn(cmd, dimensions=(40, 200), cwd=spawn_cwd, env=spawn_env)
-    log.info("spawned claude pid=%s", proc.pid)
+    # proc 用可变 holder 持有，resume 重启时原地替换（_on_exit / 主循环都读它）。
+    holder: dict[str, object] = {"proc": None}
+
+    proc, ok = _spawn_and_wait_ready(
+        ctx, log, mcp_config, spawn_cwd, spawn_env, inject_port)
+    holder["proc"] = proc
     lc.write_meta(ctx, child_pid=proc.pid)
     lc.record_spawned_child(ctx, proc.pid)
 
     def _on_exit() -> None:
+        cur = holder.get("proc")
         try:
-            if proc.isalive():
-                proc.terminate(force=True)
-                log.info("cleanup: killed claude pid=%s", proc.pid)
+            if cur is not None and cur.isalive():
+                cur.terminate(force=True)
+                log.info("cleanup: killed claude pid=%s", cur.pid)
         except Exception as e:
             log.warning("cleanup kill failed: %s", e)
         try:
@@ -218,73 +308,67 @@ def main() -> int:
 
     lc.install_cleanup(ctx, on_exit=_on_exit)
 
-    # PTY 读线程：累积屏文本，用于确认警告框 + 判就绪。
-    screen: list[str] = []
-    lock = threading.Lock()
-
-    pty_log = ctx.session_dir / "pty.log"
-
-    def _reader() -> None:
-        fh = pty_log.open("a", encoding="utf-8")
-        while proc.isalive():
-            try:
-                chunk = proc.read(2048)
-            except EOFError:
-                break
-            except Exception:
-                if not proc.isalive():
-                    break
-                time.sleep(0.1)
-                continue
-            if not chunk:
-                time.sleep(0.05)
-                continue
-            text = _clean(chunk if isinstance(chunk, str) else chunk.decode("utf-8", "replace"))
-            with lock:
-                screen.append(text)
-            try:
-                fh.write(text)
-                fh.flush()
-            except Exception:
-                pass
-        fh.close()
-
-    threading.Thread(target=_reader, daemon=True).start()
-
-    def _screen() -> str:
-        with lock:
-            return "".join(screen)
-
-    # 阶段 1：等 dev-channel 警告框出现 → 喂 \r 确认选项 1（local development）。
-    warned = False
-    deadline = time.time() + 20
-    while time.time() < deadline:
-        if not proc.isalive():
-            log.error("claude exited before warning dialog")
-            return 4
-        if any(m.lower() in _screen().lower().replace(" ", "") for m in _WARNING_MARKERS):
-            log.info("dev-channel warning dialog detected — confirming")
-            proc.write("\r")
-            warned = True
-            time.sleep(2)
-            break
-        time.sleep(0.5)
-    if not warned:
-        log.warning("no dev-channel warning dialog within 20s (continuing)")
-
-    # 阶段 2：等 channel_server /health OK（channel_server 是 claude 的 stdio 子进程，
-    # claude 起来它就起来）。
-    for _ in range(30):
-        if _inject_health(inject_port):
-            log.info("channel_server /health OK on inject_port=%d", inject_port)
-            break
-        if not proc.isalive():
-            log.error("claude exited before channel healthy")
-            return 4
-        time.sleep(1)
-    else:
-        log.error("channel_server never became healthy")
+    if not ok:
+        log.error("initial spawn never became ready")
         return 5
+
+    def _do_resume(session_id: str) -> None:
+        """Kill current child and re-spawn with --resume <session_id>.
+
+        See docs/后端设计.md "resume 控制通路". On failure (e.g. transcript not
+        found → claude exits) fall back: tell the user, keep the daemon alive so
+        a fresh /proj can recover. The old child is always killed first — a
+        session has at most one live child (single-select model).
+        """
+        old = holder.get("proc")
+        log.info("RESUME requested → session=%s (killing pid=%s)",
+                 session_id, getattr(old, "pid", "?"))
+        try:
+            if old is not None and old.isalive():
+                old.terminate(force=True)
+        except Exception as e:
+            log.warning("resume: kill old child failed: %s", e)
+        new_proc, ok2 = _spawn_and_wait_ready(
+            ctx, log, mcp_config, spawn_cwd, spawn_env, inject_port,
+            resume_session_id=session_id)
+        holder["proc"] = new_proc
+        if ok2:
+            lc.write_meta(ctx, child_pid=new_proc.pid)
+            lc.record_spawned_child(ctx, new_proc.pid)
+            log.info("resume ready, new pid=%s", new_proc.pid)
+            _write_outbox(ALIAS, "✅ 已接回历史会话，可以继续对话了。")
+        else:
+            log.error("resume spawn never became ready (session=%s)", session_id)
+            _write_outbox(
+                ALIAS,
+                "⚠️ 接回该会话失败（可能历史已失效）。已保持在线，"
+                "发消息可继续，或用 /proj 重新选。",
+            )
+
+    def _check_resume_signal() -> bool:
+        """Read+delete control_path if it carries a RESUME: signal.
+
+        Returns True if a resume was handled this tick. Non-RESUME content is
+        ignored (claude_channel doesn't do PTY control) but still consumed so it
+        can't linger. See docs/入站路由.md.
+        """
+        cp = control_path(ALIAS)
+        if not cp.exists():
+            return False
+        try:
+            raw = cp.read_text(encoding="utf-8").strip()
+        except Exception:
+            raw = ""
+        try:
+            cp.unlink()
+        except Exception:
+            pass
+        if raw.startswith("RESUME:"):
+            sid = raw[len("RESUME:"):].strip()
+            if sid:
+                _do_resume(sid)
+                return True
+        return False
 
     # 就绪：写 marker，让 web/spawn.watch_ready 给用户发就绪通知。
     try:
@@ -298,7 +382,13 @@ def main() -> int:
     p = inbox_path(ALIAS)
     last_mtime = p.stat().st_mtime if p.exists() else 0.0
     while True:
-        if not proc.isalive():
+        # resume 控制信号优先于 inbox：若本轮做了 resume，child 已换新，
+        # inbox baseline 不动（resume 不消费用户消息，只换会话）。
+        if _check_resume_signal():
+            proc = holder["proc"]  # type: ignore[assignment]
+            continue
+        proc = holder["proc"]  # type: ignore[assignment]
+        if proc is None or not proc.isalive():
             log.error("claude died — exiting daemon")
             _write_outbox(ALIAS, "⚠️ 会话进程已退出（可能撞限额或崩溃）。请用 /new 重开。")
             return 6

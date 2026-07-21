@@ -20,7 +20,8 @@
 - **MCP 服务器名 = `cca-msg`**（不是 `web-chat`）。Skill 触发器名 = `chats-loop`（不是 `web-relay`）。`~/.claude.json` 里 `mcpServers.cca-msg.args[0]` 必须指向本仓库的 `chats_control_agents/backends/claude_code/mcp_bridge.py`。改路径前先备份 `~/.claude.json`。
 - **全局单选中 alias**：`chat_sessions/_current.txt` 一个文件，所有 weixin/web 入站消息都路由到它。多用户路由要按 `peer_id` 分流，目前没做。
 - **daemon spawn child claude 的 cwd 不是 agent-bridge 自己**，而是 `D:/aiproject/claude-code-account-switch`（ccs 工具目录），这样 child claude 用 CCS 当前选中的账号。不要假定 child claude 跟 daemon 在同一目录。
-- **现在有两个 backend：`claude_code` 和 `hermes_acp`**。`meta.json.backend` 字段决定起哪个 daemon（`core.spawn._resolve_daemon_module`）。命令行入口（微信 `/proj` / `/new`）读 `chat_sessions/_default_backend.txt`（缺省 `claude_code`），`/backend <name>` 命令改它；dashboard 建会话用 modal 下拉选，不读此文件。**新加 backend 要同步 3 处**：`core.sessions.KNOWN_BACKENDS`、`core.spawn._BACKEND_DAEMON_MODULES`、`web.spawn_helpers._KNOWN_BACKENDS`。详见 `docs/后端设计.md`。
+- **现在有三个 backend：`claude_code`、`hermes_acp`、`claude_channel`**。`meta.json.backend` 字段决定起哪个 daemon（`core.spawn._resolve_daemon_module`）。命令行入口（微信 `/proj` / `/new`）读 `chat_sessions/_default_backend.txt`（缺省 `claude_code`），`/backend <name>` 命令改它；dashboard 建会话用 modal 下拉选，不读此文件。**新加 backend 要同步 3 处**：`core.sessions.KNOWN_BACKENDS`、`core.spawn._BACKEND_DAEMON_MODULES`、`web.spawn_helpers._KNOWN_BACKENDS`。详见 `docs/后端设计.md`。
+- **只有 `claude_channel` 支持 resume（接回历史会话）**。`/proj` 语义已翻转为"选项目→选该项目历史会话→接回上下文"（default backend=claude_channel 时才走两级菜单，否则退化直接起会话）；`/new` 是开全新白纸的显式出口。通路：router 写 `RESUME:<session-id>` 进 `pty_control.txt`，claude_channel daemon 主循环认 `RESUME:` 前缀 → kill 旧 child → 带 `--resume` 重 spawn。`--resume` 与 dev-channel flag 实测兼容。详见 `docs/入站路由.md` "两级菜单" + `docs/后端设计.md` "resume 控制通路"。
 - **web 端口在 `config.json:web_port`**，缺省 8765。代码里**不**写死端口——`core.config.get_web_port()` 是单一来源，server / dashboard UI / start_web_detached 都读它。**例外**：hook 副本 `~/.claude/hooks/chats_loop_pretool_hook.py` 是 install.py 装的时候渲染一次（源文件里 `# CHATS_BRIDGE_WEB_PORT_LINE` 标记行被替换）。**改了 `web_port` 必须重跑 `python install/install.py --hook`**——否则 hook 还会 push 到老端口。
 
 ## 已知坑（容易再踩）
@@ -59,6 +60,7 @@ web_server.py (Starlette, port = config.json:web_port，缺省 8765)
 
 ## 配置版本
 
+- 2026-07-21：claude_channel resume（接回历史会话）落地。`/proj` 翻转为 resume 默认路径（两级菜单：项目→会话），`/new` 为白纸出口。新增 `core/resume_choices.py`（第二级 arm 令牌）+ `core/resume_scan.py`（扫 `~/.claude/projects/<cwd>/*.jsonl` 列最近5会话、清洗首条人话摘要）。daemon 主循环认 `RESUME:` 前缀 kill+带 `--resume` 重 spawn。本地 e2e 全过（含上下文真接回验证）。详见两份 docs 上述专节。
 - 2026-07-16：bridge-owned 会话契约落地（`docs/入站路由.md` 新增专节）。mcp_bridge 只注册 meta（bridge_pid），不抢 `_current.txt`；路由可服务性 = `daemon 活 || (bridge 活 && marker 在)`，bridge 活但 marker 不在 → 回 `/proj` 菜单而不是静默吞消息。
 - 2026-06-22：纯数字入站语义改 one-shot 菜单选择（详见 `docs/入站路由.md` "纯数字入站"段）。废掉了 daemon **全程常开的 `control_mode`**——以前 `/proj` 120s 窗口外任何数字都被当 PTY 控制吞掉。现在数字默认是聊天，只有菜单刚弹出那一回合才认。daemon `write_menu_block` 拆成"普通文本纯中继 / 菜单才 arm+脚注"（`_looks_like_menu` heuristic）。
 - 最后更新：2026-06-08（创建后同日修了 outbox 残留重放 bug，已同步"已知坑"那段）

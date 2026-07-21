@@ -14,6 +14,7 @@ from .history import load_history, now_iso, save_history
 from .paths import control_mode_path, control_path, inbox_path, loop_marker_fresh, outbox_path
 from .pid_track import _pid_alive
 from .proj_choices import proj_choices_active, write_proj_choices
+from .resume_choices import resume_choices_active, write_resume_choices
 from .spawn import ensure_daemon_alive
 
 
@@ -73,20 +74,23 @@ async def route_inbound(text: str, source: str) -> RouteOutcome:
     alias0 = sx.get_current()
     pty_armed = _consume_pty_arm(alias0)
     proj_armed = proj_choices_active()
+    resume_armed = resume_choices_active()
     is_digit = text.strip().isdigit()
 
     if cmd.is_command(text):
-        # digit-while-proj-armed lands here and picks the project; the pick
-        # clears proj_choices internally.
+        # digit-while-proj/resume-armed lands here and picks; the pick clears
+        # proj_choices / resume_choices internally.
         alias_before = sx.get_current()
         reply = cmd.handle_command(text)
         alias_after = sx.get_current()
         return RouteOutcome(reply=reply, alias=alias_after or alias_before)
 
-    # Not a proj pick. If a proj menu was armed, this inbound disarms it —
+    # Not a menu pick. If a proj/resume menu was armed, this inbound disarms it —
     # control and chat don't mix; the menu only lived for that one turn.
     if proj_armed:
         write_proj_choices(None)
+    if resume_armed:
+        write_resume_choices(None)
 
     text = cmd.strip_passthrough_prefix(text)
 

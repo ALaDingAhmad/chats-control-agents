@@ -29,6 +29,10 @@ CONFIG_FILE = ROOT / "config.json"
 # /proj numeric-pick state (persisted across web_server restarts)
 PROJ_CHOICES_FILE = SESSIONS_ROOT / "_pending_proj.json"
 
+# Second-level resume session-pick state (after picking a project via /proj).
+# Same persistence rationale as PROJ_CHOICES_FILE. See docs/入站路由.md "两级菜单".
+RESUME_CHOICES_FILE = SESSIONS_ROOT / "_pending_resume.json"
+
 # Queue: web_server's autospawn worker drains this
 AUTOSPAWN_QUEUE_FILE = SESSIONS_ROOT / "_autospawn_queue.jsonl"
 
