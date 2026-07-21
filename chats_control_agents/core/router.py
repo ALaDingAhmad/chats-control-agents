@@ -92,7 +92,11 @@ async def route_inbound(text: str, source: str) -> RouteOutcome:
 
     alias = sx.get_current()
     if not alias:
-        return RouteOutcome(reply="⚠️ 还没有活动会话，请先在 dashboard 创建一个。")
+        # 零会话：不把用户赶去 dashboard，直接弹 /proj 项目菜单让他就地建会话。
+        # 复用 handle_command("/proj") 保证菜单格式/分页/arm 完全一致（见 docs/入站路由.md 第 3 条）。
+        log.info("no current session — showing /proj menu for inbound")
+        menu = cmd.handle_command("/proj")
+        return RouteOutcome(reply=menu)
 
     if is_digit and pty_armed:
         p = control_path(alias)
