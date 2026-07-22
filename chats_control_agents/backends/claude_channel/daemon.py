@@ -30,6 +30,7 @@ from pathlib import Path
 
 from chats_control_agents.core import daemon_lifecycle as lc
 from chats_control_agents.core.paths import ROOT, control_path, inbox_path, outbox_path
+from chats_control_agents.core.resume_scan import tail_turns
 # 复用 claude_code daemon 的 claude.exe 定位（纯函数，无副作用）
 from chats_control_agents.backends.claude_code.daemon import _find_claude_bin
 
@@ -87,6 +88,28 @@ def _write_outbox(alias: str, text: str) -> None:
     p = outbox_path(alias)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(f"[{stamp}]\n{text}\n", encoding="utf-8")
+
+
+def _resume_recap(cwd: str, session_id: str) -> str:
+    """接回后给微信看的"最近两轮对话"文本；取不到返回 ''（调用方跳过）。
+
+    数据源是 transcript（含 claude 回复），见 resume_scan.tail_turns +
+    docs/入站路由.md "接回后回顾"。任何异常都吞掉——回顾是锦上添花，
+    绝不能因它挂掉 resume 就绪流程。
+    """
+    try:
+        pairs = tail_turns(cwd, session_id)
+    except Exception:
+        return ""
+    if not pairs:
+        return ""
+    blocks = ["📜 上次聊到这里："]
+    for p in pairs:
+        if p.get("user"):
+            blocks.append(f"你：{p['user']}")
+        if p.get("assistant"):
+            blocks.append(f"我：{p['assistant']}")
+    return "\n".join(blocks)
 
 
 def _free_port() -> int:
@@ -336,7 +359,13 @@ def main() -> int:
             lc.write_meta(ctx, child_pid=new_proc.pid)
             lc.record_spawned_child(ctx, new_proc.pid)
             log.info("resume ready, new pid=%s", new_proc.pid)
-            _write_outbox(ALIAS, "✅ 已接回历史会话，可以继续对话了。")
+            # 推最近两轮对话让用户看到"上次聊到哪"（child claude 内存里有
+            # 历史但不会主动打印）+ 接回确认。**必须拼成一条** _write_outbox：
+            # outbox 只保留最新一条（覆写语义，见 CLAUDE.md），分两次写后一条
+            # 会盖掉前一条。取不到回顾就只发确认。见 docs/入站路由.md "接回后回顾"。
+            recap = _resume_recap(spawn_cwd, session_id)
+            tail = "✅ 已接回历史会话，可以继续对话了。"
+            _write_outbox(ALIAS, f"{recap}\n\n{tail}" if recap else tail)
         else:
             log.error("resume spawn never became ready (session=%s)", session_id)
             _write_outbox(
