@@ -303,8 +303,9 @@ def _resume_or_start(cwd: str, *, project: dict | None = None, blank: bool = Fal
 def _enter_resume_menu(cwd: str, sessions: list[dict], *, project: dict | None, blank: bool) -> str:
     """Arm the second-level resume menu and render it for the phone.
 
-    Each row = time + first-human-message summary. Replying with a bare integer
-    picks a session to --resume (handled by _cmd_pick_resume).
+    Each row = time + a summary of the session's last few user inputs (from
+    ~/.claude/history.jsonl — see resume_scan.list_recent_sessions). Replying
+    with a bare integer picks a session to --resume (handled by _cmd_pick_resume).
     """
     label = "空会话（主目录）" if blank else (project or {}).get("name", cwd)
     lines = [f"「{label}」最近的会话（回复编号接回上下文）："]
