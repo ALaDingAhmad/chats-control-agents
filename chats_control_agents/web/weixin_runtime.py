@@ -409,9 +409,12 @@ async def _stop_typing(
 
 # ── Outbox watcher (per-alias outbound) ──────────────────────────────────
 async def _outbox_watcher(account: dict):
-    """Watch every session's outbox; forward fresh replies back to the WeChat
-    peer that most recently sent INTO that session. _wx['alias_peer'] tracks
-    that mapping (set by _inbound_longpoll when a WeChat message arrives).
+    """Watch the CURRENT session's outbox; forward fresh replies to the WeChat
+    peer that most recently sent INTO it. Only _current is pushed — WeChat is a
+    single window, so out-of-focus sessions are never forwarded (see
+    docs/入站路由.md "出站推送契约"). _wx['alias_peer'] maps alias→peer (set by
+    _inbound_longpoll). Startup still primes _outbox_seen for ALL sessions so
+    switching back to an old session doesn't replay its pre-existing outbox.
     """
     token = account["bot_token"]
     base_url = account["baseurl"]
@@ -442,8 +445,12 @@ async def _outbox_watcher(account: dict):
         async with wx._build_session() as session:
             while _wx.get("running"):
                 await asyncio.sleep(0.5)
-                for sess in sx.list_sessions():
-                    alias = sess["alias"]
+                # 只推当前会话（docs/入站路由.md "出站推送契约"）。微信单窗口、
+                # _current 单选，出站视角必须和入站一致：非 current 会话吐内容
+                # 也不推。切走的会话回复静躺 outbox，切回时（current 变了）自然
+                # 被推——不是补推逻辑，是"每轮只看 current"的自然结果。
+                cur = sx.get_current()
+                for alias in ([cur] if cur else []):
                     p = outbox_path(alias)
                     if not p.exists():
                         continue
