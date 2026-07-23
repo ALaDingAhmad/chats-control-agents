@@ -1,6 +1,6 @@
 """hermes_acp daemon: 1 alias = 1 daemon = 1 `hermes acp` 子进程 = 1 ACP session。
 
-daemon **在消息路径上**（"路径内"型 backend，对比 claude_code 的"路径外"）：
+daemon **在消息路径上**（"路径内"型 backend，对比已删的 claude_code "路径外"（见 docs/后端设计.md））：
 
   router → inbox.txt
               ↑ poll(0.5s)
@@ -16,7 +16,7 @@ daemon **在消息路径上**（"路径内"型 backend，对比 claude_code 的"
   3. AcpClient.start() → spawn `hermes acp` 子进程
   4. initialize → new_session(cwd) → 拿 sessionId（首次 60-80s）
   5. install_cleanup(on_exit=acp.stop)
-  6. 写 ready marker（`~/.claude/.chats-loop-active-<alias>`），让 watch_ready
+  6. 写 ready marker（`~/.claude/.session-ready-<alias>`），让 watch_ready
      给用户发"会话已就绪"通知
   7. 进入主循环：poll inbox.txt，新内容 → AcpClient.prompt → 拿 turn 结果 → 写 outbox.txt
 
@@ -37,10 +37,10 @@ from chats_control_agents.core.paths import inbox_path, outbox_path
 from .acp_client import AcpClient
 
 
-# inbox 轮询间隔 —— 跟 claude_code mcp_bridge 一致
+# inbox 轮询间隔
 POLL_INTERVAL_SECS = 0.5
 
-# ready marker：跟 claude_code 共用同一组目录约定，这样 web spawn.watch_ready
+# ready marker：跟 channel 共用同一组目录约定，这样 web spawn.watch_ready
 # 不用为新 backend 改任何代码就能识别"就绪"
 _MARKER_DIR = Path.home() / ".claude"
 
@@ -49,11 +49,11 @@ ALIAS, CWD_ARG = lc.parse_cli_args(default_cwd=Path.home())
 
 
 def _marker_path(alias: str) -> Path:
-    return _MARKER_DIR / f".chats-loop-active-{alias}"
+    return _MARKER_DIR / f".session-ready-{alias}"
 
 
 def _write_outbox(alias: str, text: str) -> None:
-    """跟 claude_code mcp_bridge 一致的 outbox 格式：覆写 `[HH:MM:SS]\\n<reply>\\n`。"""
+    """跟 channel 一致的 outbox 格式：覆写 `[HH:MM:SS]\\n<reply>\\n`。"""
     stamp = datetime.now().strftime("%H:%M:%S")
     p = outbox_path(alias)
     p.parent.mkdir(parents=True, exist_ok=True)

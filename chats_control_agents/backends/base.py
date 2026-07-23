@@ -1,17 +1,18 @@
 """Backend abstraction.
 
 A *backend* is the "AI end" of agent-bridge — whatever process or service
-actually turns a user message into a reply. Today: claude_code (spawns a
-child claude.exe per session and talks to it via mcp_bridge file IO).
-Future: openclaw, hermes-agent, direct Anthropic API, local LLM, …
+actually turns a user message into a reply. Today: claude_channel (spawns a
+child claude.exe per session, channels push model; daemon reads/writes the
+inbox/outbox directly) and hermes_acp. Future: openclaw, direct Anthropic
+API, local LLM, …  (claude_code + mcp_bridge was removed 2026-07-23.)
 
 Backends are pluggable: the router picks one based on session config.
 Sessions today are 1-1 with a backend instance; the abstraction allows
 future N-1 (multiple aliases sharing a stateless API backend) but we don't
 implement that yet.
 
-This base class is intentionally loose — claude_code today is process-typed
-(daemon + child claude.exe + mcp_bridge), while a hypothetical openclaw
+This base class is intentionally loose — claude_channel today is process-typed
+(daemon + child claude.exe), while a hypothetical openclaw
 backend might be API-typed (stateless HTTP). The interface accommodates
 both: `send` takes the session and the message, and returns when the agent
 has replied. How that happens — file IO, HTTP call, RPC — is the backend's
@@ -26,13 +27,13 @@ class Backend(ABC):
     """One AI execution engine. Backends are stateless from the bridge's POV;
     any per-session state they need lives under chat_sessions/<alias>/."""
 
-    name: str  # short identifier, e.g. "claude_code", "openclaw"
+    name: str  # short identifier, e.g. "claude_channel", "hermes_acp"
 
     @abstractmethod
     async def ensure_session(self, alias: str, cwd: str) -> bool:
         """Make sure a backend instance exists and is ready for this session.
 
-        For process-typed backends (claude_code) this may spawn a daemon if
+        For process-typed backends (claude_channel) this may spawn a daemon if
         none is alive. For API-typed backends this can be a no-op.
 
         Returns True when the session is ready to accept send() calls.

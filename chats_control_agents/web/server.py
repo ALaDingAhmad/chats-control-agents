@@ -36,7 +36,6 @@ from .routes.projects import (
     list_projects_route,
     update_workspace_route,
 )
-from .routes.install_status import install_run, install_status
 from .routes.sessions import end_daemon_route, list_sessions_route, set_current_route
 from .routes.weixin import (
     weixin_disconnect,
@@ -92,8 +91,6 @@ app = Starlette(
         Route("/projects", list_projects_route),
         Route("/config", get_config_route),
         Route("/config/workspace", update_workspace_route, methods=["POST"]),
-        Route("/install/status", install_status),
-        Route("/install/run", install_run, methods=["POST"]),
         Route("/weixin", weixin_page),
         Route("/weixin/status", weixin_status),
         Route("/weixin/qr/start", weixin_qr_start, methods=["POST"]),

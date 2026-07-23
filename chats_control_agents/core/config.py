@@ -41,13 +41,7 @@ def save_config(cfg: dict) -> None:
 
 
 def get_web_port() -> int:
-    """Read web_server 监听端口。缺省 8765。
-
-    改了之后必须重启 web_server。如果改的同时还跑着 hook（child claude
-    PreToolUse 回 `/relay-push`），必须重跑 `install/install.py --hook`
-    让 hook 副本里的端口也跟着变——hook 装到 ~/.claude/hooks/ 是冻结
-    副本，不动态读 config.json。
-    """
+    """Read web_server 监听端口。缺省 8765。改了之后必须重启 web_server。"""
     cfg = load_config()
     raw = cfg.get("web_port", 8765)
     try:

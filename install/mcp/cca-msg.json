@@ -1,8 +1,0 @@
-{
-  "type": "stdio",
-  "command": "python",
-  "args": [
-    "{{MCP_BRIDGE_ABS_PATH}}"
-  ],
-  "env": {}
-}

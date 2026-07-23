@@ -133,12 +133,9 @@
     <!-- Claude Code -->
     <div class="card" id="card-claude">
       <h2><span class="icon">🤖</span>Claude Code <span class="badge dim" id="claude-mcp">--</span></h2>
-      <div class="body">本地 Claude Code 子进程通过 MCP 桥接，每个会话一个独立 child claude。</div>
+      <div class="body">本地 Claude Code 子进程（channel 推模型），每个会话一个独立 child claude，daemon 直接读写 inbox/outbox。</div>
       <div class="kv"><span>已起 daemon</span><b id="claude-daemons">--</b></div>
       <div class="kv"><span>已登记会话</span><b id="claude-sessions">--</b></div>
-      <div class="actions">
-        <a class="btn" href="/settings#claude-code">Claude Code 设置</a>
-      </div>
     </div>
 
     <!-- Hermes ACP -->
@@ -194,11 +191,7 @@ async function refresh() {
 
     // claude code card
     const claudeMcp = document.getElementById('claude-mcp');
-    if (d.claude && d.claude.mcp_registered) {
-      claudeMcp.textContent = 'MCP 已注册'; claudeMcp.className = 'badge on';
-    } else {
-      claudeMcp.textContent = 'MCP 未注册'; claudeMcp.className = 'badge off';
-    }
+    claudeMcp.textContent = 'channel'; claudeMcp.className = 'badge on';
     const cc = d.claude || {};
     document.getElementById('claude-daemons').textContent =
       `${cc.sessions_online ?? 0} / ${cc.sessions_total ?? 0}`;

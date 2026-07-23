@@ -227,9 +227,10 @@ def _cmd_proj(args: list[str], *, for_new: bool = False) -> str:
         if p["root"] != last_root:
             lines.append(f"— {p['root']} —")
             last_root = p["root"]
-        if p["online"]:
+        state = p.get("state") or ("offline" if p["alias"] else "idle")
+        if state == "online":
             tag = f"在线 → {p['alias']}"
-        elif p["alias"]:
+        elif state == "offline":
             tag = f"离线 → {p['alias']}"
         else:
             tag = "未运行"
@@ -288,10 +289,17 @@ def _resume_or_start(cwd: str, *, project: dict | None = None, blank: bool = Fal
 
     Resume is only wired for claude_channel (only its daemon understands the
     RESUME: control signal — see docs/后端设计.md). Skip the resume menu when:
+      - the project already has a LIVE session (online) — just switch to it, it's
+        alive, there's no "which history to reconnect" question (docs/入站路由.md
+        "在线会话短路"), or
       - for_new (the pick came from /new — user explicitly wants a fresh start), or
       - the default backend isn't claude_channel, or
       - the cwd has no transcript history.
     """
+    # 在线会话短路：选中项目已有活 daemon → 直接切，不弹二级 resume 菜单。
+    if project and project.get("online") and project.get("alias"):
+        return _start_session_for_cwd(cwd, project=project, blank=blank)
+
     if not for_new and get_default_backend() == "claude_channel":
         sessions = list_recent_sessions(cwd)
         if sessions:
@@ -458,7 +466,7 @@ def _cmd_use(alias: str) -> str:
         return f"切换失败：{e}"
     m = load_meta_for(alias) or {}
     online = bool(m.get("daemon_pid")) and _pid_alive(m.get("daemon_pid"))
-    note = "" if online else f"\n⚠️ 该会话离线。在电脑跑：\n  python -m chats_control_agents.backends.claude_code.daemon {alias}"
+    note = "" if online else f"\n⚠️ 该会话离线。在电脑跑：\n  python -m chats_control_agents.backends.claude_channel.daemon {alias}"
     return f"已切到会话 {alias!r}。{note}"
 
 
@@ -490,10 +498,9 @@ def _cmd_end(alias: str) -> str:
 def _cmd_stop() -> str:
     """中断当前会话正在执行的任务。
 
-    daemon-managed 会话：写 control_path = "9"，daemon 既有逻辑发 ESC 给
-    child claude（docs/入站路由.md "/stop 命令随时可用"段）。显式命令不受
-    裸数字的 one-shot arm 限制。bridge-owned（用户自己终端里的 chats-loop）
-    远程中断不了——模型推理无法从信箱层抢占，只能在那个终端按 ESC。
+    写 control_path = "9"，daemon 既有逻辑发 ESC 给 child claude
+    （docs/入站路由.md "/stop 命令随时可用"段）。显式命令不受裸数字的
+    one-shot arm 限制。
     """
     alias = get_current()
     if not alias:
@@ -510,12 +517,6 @@ def _cmd_stop() -> str:
         return (
             f"已向会话 {alias!r} 发送中断（ESC），daemon 执行后会回执 sent ESC。\n"
             "任务停止后发下一条消息继续。"
-        )
-    bridge_pid = m.get("bridge_pid")
-    if bridge_pid and _pid_alive(bridge_pid):
-        return (
-            f"会话 {alias!r} 跑在你本机的终端 claude 里（chats-loop），"
-            "远程中断不了——到那个终端窗口按 ESC。"
         )
     return f"会话 {alias!r} 不在线，没有正在执行的任务。"
 

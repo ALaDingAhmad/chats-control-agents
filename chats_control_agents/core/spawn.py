@@ -25,7 +25,7 @@ log = logging.getLogger("core.spawn")
 
 _HISTORICAL_CWD = str(ROOT.parent / "claude-code-account-switch")
 
-# Total time we'll wait for ~/.claude/.chats-loop-active-<alias> after spawn.
+# Total time we'll wait for ~/.claude/.session-ready-<alias> after spawn.
 READY_NOTIFY_TIMEOUT_SECS = 120.0
 
 
@@ -64,20 +64,24 @@ async def watch_ready(alias: str, daemon_pid: int) -> None:
 
 
 _BACKEND_DAEMON_MODULES = {
-    "claude_code": "chats_control_agents.backends.claude_code.daemon",
     "hermes_acp": "chats_control_agents.backends.hermes_acp.daemon",
     "claude_channel": "chats_control_agents.backends.claude_channel.daemon",
 }
 
+# claude_code 已删除（2026-07-23）。老会话 meta.backend=="claude_code" 一律
+# 回退到 claude_channel（也是 spawn child claude，能接上）。
+_DEFAULT_BACKEND = "claude_channel"
+
 
 def _resolve_daemon_module(alias: str) -> str:
-    """Resolve daemon module from session meta; defaults to claude_code."""
+    """Resolve daemon module from session meta; defaults to claude_channel."""
     meta = sx.load_meta_for(alias) or {}
-    backend = meta.get("backend") or "claude_code"
+    backend = meta.get("backend") or _DEFAULT_BACKEND
     mod = _BACKEND_DAEMON_MODULES.get(backend)
     if mod is None:
-        log.warning("spawn[%s]: unknown backend %r, falling back to claude_code", alias, backend)
-        return _BACKEND_DAEMON_MODULES["claude_code"]
+        log.warning("spawn[%s]: unknown/removed backend %r, falling back to %s",
+                    alias, backend, _DEFAULT_BACKEND)
+        return _BACKEND_DAEMON_MODULES[_DEFAULT_BACKEND]
     return mod
 
 
@@ -124,20 +128,13 @@ def spawn_daemon_detached(alias: str, cwd: str) -> int | None:
 async def ensure_daemon_alive(alias: str) -> bool:
     """If alias's daemon is dead, spawn a new one and wait until alive.
 
-    Bridge-owned sessions (a user-opened claude window with cca-msg attached,
-    no daemon): never stack a daemon on a live bridge — two consumers would
-    race on the same inbox. Serviceable only if the chats-loop marker exists;
-    a live bridge process alone just means the MCP server is attached, not
-    that anyone is polling the inbox (docs/入站路由.md "终端 chats-loop 会话").
+    （原 bridge-owned 分支——活 bridge 不叠 daemon、看 chats-loop marker——已随
+    claude_code 删除。现在会话只有 daemon 一种活法。）
     """
     m = sx.load_meta_for(alias) or {}
     pid = m.get("daemon_pid")
     if pid and _pid_alive(pid):
         return True
-
-    bridge_pid = m.get("bridge_pid")
-    if bridge_pid and _pid_alive(bridge_pid):
-        return loop_marker_fresh(alias)
 
     cwd = m.get("cwd") or _HISTORICAL_CWD
     log.info("ensure[%s]: daemon pid=%s dead, respawning at cwd=%s", alias, pid, cwd)

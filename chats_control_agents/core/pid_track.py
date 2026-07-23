@@ -1,6 +1,6 @@
 """Cross-platform PID liveness + daemon-spawned-child identification.
 
-The daemon (claude_code backend) appends to chat_sessions/<alias>/spawned_pids.jsonl
+The daemon appends to chat_sessions/<alias>/spawned_pids.jsonl
 every time it spawns a child claude.exe. This module reads those records and
 filters to PIDs that are (a) alive AND (b) whose process create_time matches
 the value we logged — that combination rules out PID-recycling collisions.
@@ -144,7 +144,7 @@ def is_daemon_child(pid: int) -> bool:
 
 
 def list_daemon_descendants() -> set[int]:
-    """Daemon child PIDs plus all of their descendants (mcp_bridge, cmd.exe
+    """Daemon child PIDs plus all of their descendants (cmd.exe
     shims, etc.). Used by cleanup scripts to take down the whole tree."""
     try:
         import psutil

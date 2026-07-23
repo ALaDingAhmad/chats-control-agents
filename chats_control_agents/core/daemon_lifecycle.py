@@ -126,7 +126,7 @@ def init_lifecycle(
 ) -> DaemonContext:
     """准备日志、目录、初始 meta.json，返回上下文。
 
-    backend 应是 `backends/` 下的目录名（"claude_code" / "hermes_acp" / …）。
+    backend 应是 `backends/` 下的目录名（"claude_channel" / "hermes_acp" / …）。
     后续 `core/spawn.py` 按 meta.backend 字段选 daemon 模块。
     """
     if not ALIAS_RE.match(alias):

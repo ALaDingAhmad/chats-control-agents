@@ -37,7 +37,7 @@ RESUME_CHOICES_FILE = SESSIONS_ROOT / "_pending_resume.json"
 AUTOSPAWN_QUEUE_FILE = SESSIONS_ROOT / "_autospawn_queue.jsonl"
 
 # 默认 backend：命令行 /proj 建会话时读这里决定起哪个 daemon。
-# 缺省 claude_code；用户通过 /backend <name> 切换并写进此文件。
+# 缺省 claude_channel；用户通过 /backend <name> 切换并写进此文件。
 DEFAULT_BACKEND_FILE = SESSIONS_ROOT / "_default_backend.txt"
 
 # Alias = a-zA-Z0-9_-CJK 1-32 chars. Used as a directory name and command arg.
@@ -83,21 +83,21 @@ def control_mode_path(alias: str) -> Path:
 
 
 def loop_marker_path(alias: str) -> Path:
-    """chats-loop 激活 marker：mcp_bridge 在 wait_for_message 期间心跳 touch，
-    进程退出时删。"出现" = skill 已激活（watch_ready 用）；"当前在收件"
-    要看 mtime 新鲜度，用 loop_marker_fresh()（docs/入站路由.md "就绪通知/信号源"）。"""
-    return Path.home() / ".claude" / f".chats-loop-active-{alias}"
+    """会话就绪租约 marker：daemon 就绪后在收发循环里每 ~5s 心跳 touch。
+    "出现" = daemon 已就绪（watch_ready 用）；"当前在收件"要看 mtime 新鲜度，
+    用 loop_marker_fresh()（docs/入站路由.md "就绪通知/信号源"）。
+    （函数名带 loop 是历史 API 名，现指 channel/hermes daemon 的收发循环。）"""
+    return Path.home() / ".claude" / f".session-ready-{alias}"
 
 
-# marker 心跳租约 TTL。mcp_bridge 在 wait 阻塞期间每 ~5s touch 一次，
-# 循环停了 mtime 不再刷新，超过 TTL 即判"不在收件"——哪怕文件还在
-# （硬杀进程会留残留）、哪怕 bridge 进程还活着（只是挂着 MCP 没跑循环）。
+# marker 心跳租约 TTL。daemon 在收发循环里每 ~5s touch 一次，循环停了 mtime
+# 不再刷新，超过 TTL 即判"不在收件"——哪怕文件还在（硬杀进程会留残留）。
 LOOP_MARKER_TTL_SECS = 180.0
 
 
 def loop_marker_fresh(alias: str, ttl: float = LOOP_MARKER_TTL_SECS) -> bool:
-    """True = chats-loop 循环当前真的在收件（marker mtime 在 TTL 内）。
-    在线/可服务判定一律用本函数，不许只查 bridge PID 或 marker 存在性。"""
+    """True = daemon 收发循环当前真的在收件（marker mtime 在 TTL 内）。
+    在线/可服务判定一律用本函数，不许只查 marker 存在性。"""
     try:
         return (time.time() - loop_marker_path(alias).stat().st_mtime) <= ttl
     except OSError:

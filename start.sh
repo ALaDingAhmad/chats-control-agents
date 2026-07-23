@@ -86,18 +86,14 @@ if wx_acct:
 # default backend 从文件读（API 里没返回）
 from pathlib import Path
 db_file = Path('chat_sessions/_default_backend.txt')
-default_be = 'claude_code'
+default_be = 'claude_channel'
 if db_file.exists():
     try:
         default_be = db_file.read_text('utf-8').strip() or default_be
     except Exception:
         pass
 print(f'  默认 backend: {default_be}')
-print(f'  可用 backends: claude_code, hermes_acp')
-
-# MCP
-mcp = d.get('claude', {}).get('mcp_registered', False)
-print(f'  MCP cca-msg: {\"已注册\" if mcp else \"未注册\"}')
+print(f'  可用 backends: claude_channel, hermes_acp')
 " <<< "$API"
     ;;
   *)

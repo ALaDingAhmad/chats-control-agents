@@ -11,8 +11,7 @@ from typing import Optional
 from . import commands as cmd
 from . import sessions as sx
 from .history import load_history, now_iso, save_history
-from .paths import control_mode_path, control_path, inbox_path, loop_marker_fresh, outbox_path
-from .pid_track import _pid_alive
+from .paths import control_mode_path, control_path, inbox_path, outbox_path
 from .proj_choices import proj_choices_active, write_proj_choices
 from .resume_choices import resume_choices_active, write_resume_choices
 from .spawn import ensure_daemon_alive
@@ -125,24 +124,10 @@ async def route_inbound(text: str, source: str) -> RouteOutcome:
         return RouteOutcome(reply=prompt, alias=alias)
 
     # ── 执行端可服务性（docs/入站路由.md 决策顺序第 5 步）──
-    # bridge-owned 会话（daemon 不活但 bridge 活）：不许叠 daemon；只有
-    # chats-loop marker 在（循环真在收件）才投递，否则回菜单让用户显式选。
-    meta = sx.load_meta_for(alias) or {}
-    daemon_alive = bool(meta.get("daemon_pid")) and _pid_alive(meta.get("daemon_pid"))
-    bridge_alive = bool(meta.get("bridge_pid")) and _pid_alive(meta.get("bridge_pid"))
-    if not daemon_alive and bridge_alive:
-        if not loop_marker_fresh(alias):
-            log.info("bridge-gate[%s]: bridge alive but chats-loop inactive, prompting /proj", alias)
-            prompt = (
-                f"⚠️ 当前会话 {alias!r} 挂着一个终端 claude，但 chats-loop 没在跑，"
-                "消息没人接。\n选一个会话/项目继续，或开新会话：\n\n"
-                + cmd.handle_command("/proj")
-            )
-            return RouteOutcome(reply=prompt, alias=alias)
-    else:
-        alive = await ensure_daemon_alive(alias)
-        if not alive:
-            return RouteOutcome(reply="⚠️ agent 拉起失败，请稍后再试。", alias=alias)
+    # daemon 活着直接过，死了拉起。（原 bridge-owned 分支已随 claude_code 删除。）
+    alive = await ensure_daemon_alive(alias)
+    if not alive:
+        return RouteOutcome(reply="⚠️ agent 拉起失败，请稍后再试。", alias=alias)
 
     try:
         outbox_path(alias).write_text("", encoding="utf-8")

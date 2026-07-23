@@ -16,7 +16,7 @@ from ..core.spawn import ensure_daemon_alive, spawn_daemon_detached  # noqa: F40
 
 log = logging.getLogger("web.spawn")
 
-_KNOWN_BACKENDS = {"claude_code", "hermes_acp", "claude_channel"}
+_KNOWN_BACKENDS = {"claude_channel", "hermes_acp"}  # claude_code 已删除 2026-07-23
 
 _spawn_daemon_detached = spawn_daemon_detached
 
@@ -25,13 +25,13 @@ _spawn_daemon_detached = spawn_daemon_detached
 async def spawn_new_session(
     mode: str,
     project_cwd: str | None = None,
-    backend: str = "claude_code",
+    backend: str = "claude_channel",
 ) -> dict:
     """Create a fresh session for the user from the dashboard.
 
     mode='chat'    → cwd = home, alias = <home basename>-<MMDD-HHMM>
     mode='project' → cwd = project_cwd, alias = <basename>-<MMDD-HHMM>
-    backend        → 决定起哪个 daemon ("claude_code" / "hermes_acp")
+    backend        → 决定起哪个 daemon ("claude_channel" / "hermes_acp")
 
     Returns immediately after spawning. Daemon writes progress to outbox.
     """

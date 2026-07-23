@@ -27,7 +27,6 @@ from .paths import (
     SESSIONS_ROOT,
     history_path,
     inbox_path,
-    loop_marker_fresh,
     meta_path,
     outbox_path,
     session_dir,
@@ -36,7 +35,8 @@ from .pid_track import _pid_alive
 
 
 # 已知 backend 集合（跟 core.spawn._BACKEND_DAEMON_MODULES 一致）
-KNOWN_BACKENDS = ("claude_code", "hermes_acp", "claude_channel")
+# claude_code 已删除（2026-07-23）
+KNOWN_BACKENDS = ("claude_channel", "hermes_acp")
 _BACKEND_NAME_RE = _re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 
 
@@ -101,7 +101,7 @@ def set_current(alias: str) -> None:
 
 # ── Default backend (sticky per install, read by /proj when creating sessions) ──
 def get_default_backend() -> str:
-    """读默认 backend；文件不存在或无效时回 claude_code。"""
+    """读默认 backend；文件不存在或无效时回 claude_channel。"""
     if DEFAULT_BACKEND_FILE.exists():
         try:
             val = DEFAULT_BACKEND_FILE.read_text(encoding="utf-8").strip()
@@ -109,7 +109,7 @@ def get_default_backend() -> str:
                 return val
         except Exception:
             pass
-    return "claude_code"
+    return "claude_channel"
 
 
 def set_default_backend(name: str) -> None:
@@ -143,7 +143,7 @@ def save_meta_for(alias: str, meta: dict) -> None:
 def create_session_dir(
     alias: str,
     cwd: str,
-    backend: str = "claude_code",
+    backend: str = "claude_channel",
 ) -> None:
     """建会话目录并写初始 meta.json。
 
@@ -213,23 +213,6 @@ def _reconcile_meta_liveness(alias: str, meta: dict) -> tuple[dict, bool]:
                 except Exception:
                     pass
 
-    bridge_pid = meta.get("bridge_pid")
-    if bridge_pid:
-        if not _pid_alive(bridge_pid):
-            fixed["bridge_pid"] = None
-            changed = True
-        else:
-            logged_ct = meta.get("bridge_create_time")
-            if logged_ct is not None:
-                try:
-                    import psutil
-                    actual_ct = psutil.Process(bridge_pid).create_time()
-                    if abs(actual_ct - logged_ct) >= 1.0:
-                        fixed["bridge_pid"] = None
-                        changed = True
-                except Exception:
-                    pass
-
     return fixed, changed
 
 
@@ -255,11 +238,11 @@ def list_sessions() -> list[dict]:
             except Exception:
                 pass  # 写盘失败不阻塞列表渲染——下次扫描再尝试
         daemon_pid = m.get("daemon_pid")
-        bridge_pid = m.get("bridge_pid")
-        # bridge 活只说明 MCP 挂着；真在收件要看 marker 新鲜度（docs/入站路由.md）
-        online = (bool(daemon_pid) and _pid_alive(daemon_pid)) or (
-            bool(bridge_pid) and _pid_alive(bridge_pid) and loop_marker_fresh(alias)
-        )
+        child_pid = m.get("child_pid")
+        # online = daemon 活 && child 活。只看 daemon 会把"daemon 空转、child 死"的
+        # 僵尸误判在线（resume 失败留下的假在线）。见 docs/入站路由.md "在线判据"。
+        online = (bool(daemon_pid) and _pid_alive(daemon_pid)
+                  and bool(child_pid) and _pid_alive(child_pid))
         out.append({
             "alias": alias,
             "cwd": m.get("cwd", ""),
@@ -269,7 +252,7 @@ def list_sessions() -> list[dict]:
             "last_exit_at": m.get("last_exit_at"),
             "last_active": _last_active(alias),
             "current": alias == cur,
-            "backend": m.get("backend", "claude_code"),
+            "backend": m.get("backend", "claude_channel"),
         })
     out.sort(key=lambda s: (not s["online"], -(s["last_active"] or 0)))
     return out

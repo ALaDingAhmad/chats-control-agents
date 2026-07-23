@@ -64,13 +64,13 @@ async def new_session(request):
     Dashboard "start new session" button hits this. Spawns a fresh daemon
     with auto-generated alias and marks it current.
 
-    backend 缺省 "claude_code"，可传 "hermes_acp"——决定起哪个 daemon。
+    backend 缺省 "claude_channel"，可传 "hermes_acp"——决定起哪个 daemon。
     """
     from ..spawn_helpers import spawn_new_session
     body = await request.json()
     mode = (body.get("mode") or "").strip()
     project_cwd = (body.get("project_cwd") or "").strip() or None
-    backend = (body.get("backend") or "claude_code").strip()
+    backend = (body.get("backend") or "claude_channel").strip()
     result = await spawn_new_session(mode, project_cwd, backend=backend)
     return JSONResponse(result)
 
@@ -78,40 +78,19 @@ async def new_session(request):
 async def dashboard_status(request):
     """Aggregated state for the dashboard cards. Keeps the page to one
     request instead of fanning out to /sessions + /weixin/status + /config."""
-    import json as _json
-    from pathlib import Path as _Path
-
     from ...channels.weixin import state as wxs
     from ...core import config as cfg
-    from ...core.paths import ROOT
     from ..weixin_runtime import get_wx_state
     sessions = sx.list_sessions()
     online = sum(1 for s in sessions if s.get("online"))
     acct = wxs.load_account()
     wx_state = get_wx_state()
 
-    # per-backend counts
-    claude_total = sum(1 for s in sessions if s.get("backend", "claude_code") == "claude_code")
-    claude_online = sum(1 for s in sessions if s.get("backend", "claude_code") == "claude_code" and s.get("online"))
+    # per-backend counts（claude_code 已删；claude 卡片现统计 claude_channel）
+    claude_total = sum(1 for s in sessions if s.get("backend", "claude_channel") == "claude_channel")
+    claude_online = sum(1 for s in sessions if s.get("backend", "claude_channel") == "claude_channel" and s.get("online"))
     hermes_total = sum(1 for s in sessions if s.get("backend") == "hermes_acp")
     hermes_online = sum(1 for s in sessions if s.get("backend") == "hermes_acp" and s.get("online"))
-
-    # MCP registration check: does ~/.claude.json have a cca-msg entry
-    # pointing at OUR mcp_bridge.py?
-    mcp_registered = False
-    try:
-        claude_json = _Path.home() / ".claude.json"
-        if claude_json.exists():
-            d = _json.loads(claude_json.read_text(encoding="utf-8"))
-            wc = (d.get("mcpServers") or {}).get("cca-msg") or {}
-            args = wc.get("args") or []
-            expected = str(ROOT / "chats_control_agents" / "backends" / "claude_code" / "mcp_bridge.py")
-            expected_norm = expected.replace("\\", "/")
-            mcp_registered = any(
-                str(a).replace("\\", "/") == expected_norm for a in args
-            )
-    except Exception:
-        pass
 
     return JSONResponse({
         "current": sx.get_current(),
@@ -119,7 +98,6 @@ async def dashboard_status(request):
         "sessions_online": online,
         "web_port": cfg.get_web_port(),
         "claude": {
-            "mcp_registered": mcp_registered,
             "sessions_total": claude_total,
             "sessions_online": claude_online,
         },
@@ -215,7 +193,7 @@ async def poll(request):
     if not content:
         return JSONResponse({"changed": False, "history": load_history(alias), "alias": alias})
 
-    # outbox format from mcp_bridge.py: "[HH:MM:SS]\n<reply>"
+    # outbox format (daemon _write_outbox): "[HH:MM:SS]\n<reply>"
     lines = content.split("\n", 1)
     stamp = lines[0] if content.startswith("[") else ""
     reply = lines[1] if len(lines) > 1 else content

@@ -124,7 +124,6 @@
     <a href="#workspace"   data-tab="workspace" class="active">工作空间</a>
     <a href="#sessions"    data-tab="sessions">会话</a>
     <a href="#weixin"      data-tab="weixin">微信</a>
-    <a href="#claude-code" data-tab="claude-code">Claude Code</a>
     <a href="#system"      data-tab="system">系统</a>
   </div>
 
@@ -167,28 +166,6 @@
     </div>
   </section>
 
-  <!-- ─── Claude Code ─────────────────────────────────────── -->
-  <section class="tab" id="tab-claude-code">
-    <div class="card">
-      <h2>支持文件安装状态</h2>
-      <div class="hint">Agent Bridge 需要三件东西装在 <code>~/.claude/</code> 才能让 Claude Code 接入：
-        cca-msg MCP 服务、chats-loop skill、PreToolUse hook。点检查能看到当前状态，点安装会用 <code>install/install.py</code> 一键 merge 进去。</div>
-      <div class="status-row" id="cc-status">点"检查"查看状态…</div>
-      <pre id="cc-output" style="background:#0f172a; color:#e2e8f0; padding:14px;
-              border-radius:6px; font-size:12px; line-height:1.55; margin-top:14px;
-              max-height:280px; overflow:auto; display:none; font-family: monospace;
-              white-space: pre-wrap;"></pre>
-      <div class="actions">
-        <button type="button" class="primary" id="cc-check">检查</button>
-        <button type="button" class="secondary" id="cc-install-all">安装/更新全部</button>
-        <button type="button" class="secondary" id="cc-install-mcp">仅 MCP</button>
-        <button type="button" class="secondary" id="cc-install-skill">仅 Skill</button>
-        <button type="button" class="secondary" id="cc-install-hook">仅 Hook</button>
-      </div>
-      <div class="msg" id="cc-msg"></div>
-    </div>
-  </section>
-
   <!-- ─── 系统 ────────────────────────────────────────────── -->
   <section class="tab" id="tab-system">
     <div class="card">
@@ -215,7 +192,6 @@ function setActiveTab(name) {
   if (name === 'workspace')   refreshWorkspace();
   if (name === 'sessions')    refreshSessions();
   if (name === 'weixin')      refreshWeixin();
-  if (name === 'claude-code') refreshClaudeCode();
   if (name === 'system')      refreshSystem();
 }
 document.querySelectorAll('.tabs a').forEach(a => {
@@ -226,7 +202,7 @@ document.querySelectorAll('.tabs a').forEach(a => {
   });
 });
 const initial = (location.hash || '#workspace').slice(1);
-setActiveTab(['workspace','sessions','weixin','claude-code','system'].includes(initial) ? initial : 'workspace');
+setActiveTab(['workspace','sessions','weixin','system'].includes(initial) ? initial : 'workspace');
 
 // ── Workspace ────────────────────────────────────────────────
 const wsList = document.getElementById('ws-list');
@@ -508,73 +484,6 @@ async function sessAction(endpoint, alias) {
     sessMsg.textContent = '网络错误：' + e.message;
   }
 }
-
-// ── Claude Code ────────────────────────────────────────────
-const ccStatus = document.getElementById('cc-status');
-const ccOutput = document.getElementById('cc-output');
-const ccMsg    = document.getElementById('cc-msg');
-
-function renderInstallOutput(d) {
-  ccOutput.style.display = 'block';
-  ccOutput.textContent = d.output || '(no output)';
-  if (d.needs_install) {
-    ccStatus.className = 'status-row error';
-    ccStatus.textContent = '⚠️ 有组件需要安装或更新';
-  } else if (d.ok) {
-    ccStatus.className = 'status-row connected';
-    ccStatus.textContent = '✓ 三件支持文件都是最新的';
-  } else {
-    ccStatus.className = 'status-row error';
-    ccStatus.textContent = `安装器返回 rc=${d.rc}`;
-  }
-}
-
-async function refreshClaudeCode() {
-  ccStatus.className = 'status-row';
-  ccStatus.textContent = '检查中…';
-  ccMsg.textContent = '';
-  try {
-    const r = await fetch('/install/status');
-    const d = await r.json();
-    renderInstallOutput(d);
-  } catch (e) {
-    ccStatus.className = 'status-row error';
-    ccStatus.textContent = '检查失败：' + e.message;
-  }
-}
-
-async function runInstall(component) {
-  ccMsg.className = 'msg';
-  ccMsg.textContent = `正在执行 ${component || 'all'}…`;
-  try {
-    const r = await fetch('/install/run', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({component: component || 'all'}),
-    });
-    const d = await r.json();
-    ccOutput.style.display = 'block';
-    ccOutput.textContent = d.output || '(no output)';
-    if (d.ok) {
-      ccMsg.className = 'msg ok';
-      ccMsg.textContent = '✅ 完成。新打开的 Claude 窗口会生效；已开的需要重启那个窗口。';
-    } else {
-      ccMsg.className = 'msg err';
-      ccMsg.textContent = `安装器返回 rc=${d.rc}`;
-    }
-    // Re-fetch status after install
-    setTimeout(refreshClaudeCode, 200);
-  } catch (e) {
-    ccMsg.className = 'msg err';
-    ccMsg.textContent = '网络错误：' + e.message;
-  }
-}
-
-document.getElementById('cc-check').addEventListener('click', refreshClaudeCode);
-document.getElementById('cc-install-all'  ).addEventListener('click', () => runInstall('all'));
-document.getElementById('cc-install-mcp'  ).addEventListener('click', () => runInstall('mcp'));
-document.getElementById('cc-install-skill').addEventListener('click', () => runInstall('skill'));
-document.getElementById('cc-install-hook' ).addEventListener('click', () => runInstall('hook'));
 
 // ── System ──────────────────────────────────────────────────
 async function refreshSystem() {

@@ -2,7 +2,7 @@
 
 When the user picks an offline / new project via /proj, commands._cmd_pick_proj
 writes a request to chat_sessions/_autospawn_queue.jsonl. This worker reads
-it and spawns `python -m chats_control_agents.backends.claude_code.daemon <alias> <cwd>`
+it and spawns `python -m <backend>.daemon <alias> <cwd>` (backend from meta)
 detached from the web_server process.
 
 Dedup is by *liveness*, not by "ever spawned". We skip a queue entry only
@@ -87,7 +87,7 @@ async def autospawn_worker():
                 pid = spawn_daemon_detached(alias, cwd)
                 if pid:
                     _autospawn_pids[alias] = pid
-                    # Notify the user when chats-loop skill actually activates.
+                    # Notify the user when the daemon actually becomes ready.
                     # See docs/入站路由.md "就绪通知".
                     asyncio.create_task(watch_ready(alias, pid))
     except asyncio.CancelledError:

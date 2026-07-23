@@ -6,11 +6,11 @@ daemon 职责（路径外站位 + 内部 daemon↔channel_server 分工）：
   1. winpty 拉交互式 claude（**不带 --strict-mcp-config**，带 dev-channel flag），
      spawn 后自动喂 \\r 确认 dev-channel 全屏警告框。
   2. 起本地 HTTP 回调服务（/reply）：channel_server 收到 claude 的 reply 工具调用
-     后 POST 过来 → daemon 覆写 outbox.txt（复用 _write_outbox，格式同 mcp_bridge）。
+     后 POST 过来 → daemon 覆写 outbox.txt（复用 _write_outbox，格式同 hermes）。
   3. poll inbox.txt（mtime 判新 + startup baseline 防重放）→ 有新消息就 POST 到
      channel_server 的 /inject → notification 推进会话。
-  4. 写 ready marker（~/.claude/.chats-loop-active-<alias>）让 web spawn.watch_ready
-     识别就绪，跟 claude_code / hermes_acp 共用同一约定。
+  4. 写 ready marker（~/.claude/.session-ready-<alias>）让 web spawn.watch_ready
+     识别就绪，跟 hermes_acp 共用同一约定。
 
 CLI: python -m chats_control_agents.backends.claude_channel.daemon [<alias>] [<cwd>]
 """
@@ -31,8 +31,47 @@ from pathlib import Path
 from chats_control_agents.core import daemon_lifecycle as lc
 from chats_control_agents.core.paths import ROOT, control_path, inbox_path, outbox_path
 from chats_control_agents.core.resume_scan import tail_turns
-# 复用 claude_code daemon 的 claude.exe 定位（纯函数，无副作用）
-from chats_control_agents.backends.claude_code.daemon import _find_claude_bin
+
+
+def _find_claude_bin() -> Path:
+    """定位 claude.exe（从已删的 claude_code daemon 搬来，2026-07-23）。"""
+    import shutil
+
+    def _resolve_wrapper_target(path_str: str) -> Path | None:
+        p = Path(path_str).resolve()
+        if p.suffix.lower() in {".cmd", ".ps1"}:
+            real = p.parent / "node_modules" / "@anthropic-ai" / "claude-code" / "bin" / "claude.exe"
+            if real.exists():
+                return real
+        if p.suffix.lower() == ".exe" and p.exists():
+            return p
+        return None
+
+    found = shutil.which("claude")
+    if found:
+        resolved = _resolve_wrapper_target(found)
+        if resolved:
+            return resolved
+
+    candidates = [
+        Path.home()
+        / "AppData" / "Roaming" / "npm" / "node_modules"
+        / "@anthropic-ai" / "claude-code" / "bin" / "claude.exe",
+    ]
+    npm_prefix = os.environ.get("npm_config_prefix")
+    if npm_prefix:
+        candidates.append(
+            Path(npm_prefix) / "node_modules" / "@anthropic-ai" / "claude-code" / "bin" / "claude.exe"
+        )
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        candidates.append(
+            Path(appdata) / "npm" / "node_modules" / "@anthropic-ai" / "claude-code" / "bin" / "claude.exe"
+        )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
 
 try:
     from winpty import PtyProcess
@@ -43,10 +82,10 @@ except ImportError:
 BACKEND = "claude_channel"
 CHANNEL_NAME = "wxchan"
 
-# inbox 轮询间隔 —— 跟 claude_code / hermes 一致
+# inbox 轮询间隔 —— 跟 hermes 一致
 POLL_INTERVAL_SECS = 0.5
 
-# ready marker：跟 claude_code / hermes 共用同一组目录约定
+# ready marker：跟 hermes 共用同一组目录约定
 _MARKER_DIR = Path.home() / ".claude"
 
 # dev-channel 警告框 / TUI 就绪的抓屏 marker（实测见 CHANNELS预研.md）
@@ -79,11 +118,11 @@ ALIAS, CWD_ARG = lc.parse_cli_args(default_cwd=Path.home())
 
 
 def _marker_path(alias: str) -> Path:
-    return _MARKER_DIR / f".chats-loop-active-{alias}"
+    return _MARKER_DIR / f".session-ready-{alias}"
 
 
 def _write_outbox(alias: str, text: str) -> None:
-    """跟 claude_code mcp_bridge / hermes 一致的 outbox 格式：覆写 `[HH:MM:SS]\\n<reply>\\n`。"""
+    """跟 hermes 一致的 outbox 格式：覆写 `[HH:MM:SS]\\n<reply>\\n`。"""
     stamp = datetime.now().strftime("%H:%M:%S")
     p = outbox_path(alias)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -338,10 +377,13 @@ def main() -> int:
     def _do_resume(session_id: str) -> None:
         """Kill current child and re-spawn with --resume <session_id>.
 
-        See docs/后端设计.md "resume 控制通路". On failure (e.g. transcript not
-        found → claude exits) fall back: tell the user, keep the daemon alive so
-        a fresh /proj can recover. The old child is always killed first — a
-        session has at most one live child (single-select model).
+        On fatal failure sets holder["exit"] = True so the main loop returns
+        (daemon exits). See docs/后端设计.md "resume 失败自愈". The re-spawned child
+        may be alive-but-unhealthy (channel_server never came up) — we MUST kill
+        it, clear meta.child_pid (so online 判据 child-alive turns False), notify
+        the user, and let the daemon exit. Do NOT keep the zombie: its live
+        process fools the main loop's isalive() check → daemon spins, inject
+        keeps failing, session still shows online = "显示在线实际不在线".
         """
         old = holder.get("proc")
         log.info("RESUME requested → session=%s (killing pid=%s)",
@@ -366,13 +408,26 @@ def main() -> int:
             recap = _resume_recap(spawn_cwd, session_id)
             tail = "✅ 已接回历史会话，可以继续对话了。"
             _write_outbox(ALIAS, f"{recap}\n\n{tail}" if recap else tail)
-        else:
-            log.error("resume spawn never became ready (session=%s)", session_id)
-            _write_outbox(
-                ALIAS,
-                "⚠️ 接回该会话失败（可能历史已失效）。已保持在线，"
-                "发消息可继续，或用 /proj 重新选。",
-            )
+            return
+        # 失败：kill 没就绪的僵尸 child（进程活但 channel 死），清 child_pid，
+        # 写提示，置 exit 让主循环退出。退出后 online=False → 用户下条消息弹 /proj 重选。
+        log.error("resume spawn never became ready (session=%s) — killing zombie child, exiting daemon", session_id)
+        try:
+            if new_proc is not None and new_proc.isalive():
+                new_proc.terminate(force=True)
+        except Exception as e:
+            log.warning("resume: kill unhealthy new child failed: %s", e)
+        holder["proc"] = None
+        try:
+            lc.write_meta(ctx, child_pid=None)
+        except Exception as e:
+            log.warning("resume: clear child_pid failed: %s", e)
+        _write_outbox(
+            ALIAS,
+            "⚠️ 接回该会话失败（channel 没起来）。发消息会重新弹项目菜单，"
+            "重选会话再试。",
+        )
+        holder["exit"] = True
 
     def _check_resume_signal() -> bool:
         """Read+delete control_path if it carries a RESUME: signal.
@@ -414,6 +469,11 @@ def main() -> int:
         # resume 控制信号优先于 inbox：若本轮做了 resume，child 已换新，
         # inbox baseline 不动（resume 不消费用户消息，只换会话）。
         if _check_resume_signal():
+            # resume 致命失败 → 已 kill 僵尸 + 清 child_pid + 写提示，干净退出。
+            # 必须在下面"进程已退出"检查之前拦截，否则会覆盖 resume 失败提示。
+            if holder.get("exit"):
+                log.info("resume failed fatally — daemon exiting for reselect")
+                return 0
             proc = holder["proc"]  # type: ignore[assignment]
             continue
         proc = holder["proc"]  # type: ignore[assignment]

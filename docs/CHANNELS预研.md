@@ -1,5 +1,10 @@
 # Claude Code Channels 预研
 
+> ✅ 本预研的结论已于 2026-07-23 完全落地：`claude_channel` 成为默认且唯一的
+> claude 后端，`claude_code` + mcp_bridge/cca-msg + chats-loop skill/hook +
+> wait_for_message 循环 + marker 心跳租约（原文说"可删掉"的那些）**已全部删除**。
+> 本文作为决策来源保留。
+>
 > 目标：验证用 Claude Code 官方 channels 机制（研究预览）替代 chats-loop
 > 轮询架构——MCP server 主动把微信消息推进会话，Claude 用 reply 工具回复。
 > 结论若成立，可删掉 wait_for_message 循环、marker 心跳租约、ESC 重唤等

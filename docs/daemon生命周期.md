@@ -1,9 +1,17 @@
 
-# claude_code daemon 生命周期
+# daemon 生命周期（原 claude_code，现读作 claude_channel）
+
+> ⚠️ 2026-07-23：`claude_code` backend 已删除，本文按它写的。但 `claude_channel`
+> daemon **复用了绝大部分同一套骨架**（TUI ready 检测、trust-folder 对话框、
+> rate-limit 看门狗、drain 循环、`daemon_lifecycle`），所以这些阶段仍适用——
+> 把 `backends/claude_code/daemon.py` 读成 `backends/claude_channel/daemon.py`。
+> **不同点**：channel daemon **没有 mcp_bridge 子进程 / 不触发 `/chats-loop` skill**，
+> 它直接读写 inbox/outbox；启动改为确认 dev-channel 警告框；多了 `RESUME:` 控制
+> 通路。凡本文提到 mcp_bridge / cca-msg / `/chats-loop` / wait_for_message 的段落，
+> 都是已删的老通信层，读时跳过。就绪 marker 现为 `.session-ready-<alias>`。
 
 daemon 怎么把会话拉起来、怎么 drain child claude 的 PTY、怎么扛 rate
-limit。动 `backends/claude_code/daemon.py` 之前必读——阶段顺序是有讲究
-的，失败模式很隐蔽。
+limit——阶段顺序是有讲究的，失败模式很隐蔽。
 
 ## 进程树
 

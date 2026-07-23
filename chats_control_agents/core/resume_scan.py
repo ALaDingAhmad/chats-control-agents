@@ -64,19 +64,29 @@ def sanitized_project_dir(cwd: str) -> Path:
     return _CLAUDE_PROJECTS_DIR / name
 
 
-def _existing_transcript_ids(cwd: str) -> set[str]:
-    """Session ids that still have a transcript on disk (== resumable).
+def _existing_transcript_mtimes(cwd: str) -> dict[str, float]:
+    """{session_id: transcript mtime} for sessions with a transcript on disk.
 
     A history entry whose transcript was cleaned up can't be --resume'd, so we
-    filter those out of the menu (matches native `claude --resume`).
+    filter those out of the menu (matches native `claude --resume`). The mtime
+    is the session's true last-activity time, used for menu sort + display —
+    NOT history's timestamp, which is only "last user keystroke" (see
+    docs/入站路由.md "会话列表与摘要来源").
     """
     d = sanitized_project_dir(cwd)
     if not d.is_dir():
-        return set()
+        return {}
+    out: dict[str, float] = {}
     try:
-        return {p.stem for p in d.glob("*.jsonl") if p.is_file()}
+        for p in d.glob("*.jsonl"):
+            if p.is_file():
+                try:
+                    out[p.stem] = p.stat().st_mtime
+                except OSError:
+                    pass
     except Exception:
-        return set()
+        return {}
+    return out
 
 
 def _summary_from_inputs(displays: list[str], maxlen: int = 40) -> str:
@@ -134,21 +144,21 @@ def list_recent_sessions(cwd: str, limit: int = RESUME_MENU_LIMIT) -> list[dict]
     if not groups:
         return []
 
-    resumable = _existing_transcript_ids(cwd)
-    if not resumable:
+    transcript_mtimes = _existing_transcript_mtimes(cwd)
+    if not transcript_mtimes:
         return []  # no transcripts on disk → nothing is resumable
 
     rows: list[dict] = []
     for sid, items in groups.items():
-        if sid not in resumable:
+        if sid not in transcript_mtimes:
             continue  # transcript gone → can't --resume → hide (native parity)
-        items.sort(key=lambda x: x[0])
-        latest_ts = items[-1][0]
+        items.sort(key=lambda x: x[0])  # history 顺序，供摘要取"最近3条"
         displays = [disp for _, disp in items]
         rows.append({
             "session_id": sid,
-            # history timestamps are epoch millis; mtime callers expect seconds.
-            "mtime": (latest_ts / 1000.0) if latest_ts else 0.0,
+            # 排序/显示时间 = transcript 真实 mtime（会话最后活动），不是 history
+            # timestamp（仅"最后打字时间"）。见 docs/入站路由.md。
+            "mtime": transcript_mtimes[sid],
             "summary": _summary_from_inputs(displays),
         })
 

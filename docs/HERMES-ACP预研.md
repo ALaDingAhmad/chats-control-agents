@@ -1,5 +1,9 @@
 # Hermes ACP Spike 结论
 
+> ⚠️ 历史快照：`claude_code` backend 已于 2026-07-23 删除。本文里所有拿
+> `claude_code` 作对比/参照的段落仅为**当时的设计语境**，不代表现状。现状见
+> `CLAUDE.md` 顶部与 `docs/后端设计.md`。正文保留不逐句改。
+>
 > 2026-06-10 完成。研究 hermes-agent 作为 agent-bridge 第二个 backend 的可行性。
 > 结论：**ACP 路走通，可以动 backend**。
 
