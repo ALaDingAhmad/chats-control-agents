@@ -34,6 +34,11 @@ _WRAPPER_TAG_RE = re.compile(
 )
 _ANY_TAG_RE = re.compile(r"<[^>]+>")
 
+# Claude Code 回灌成 type==user 但不是真人打的字：后台任务/Monitor 通知
+# (<task-notification>)、工具 use 记录、attachment、system。整段丢弃，不当"你说的"
+# 推进回顾。见 docs/入站路由.md "接回后回顾"。
+_SYSTEM_TURN_RE = re.compile(r"^\s*<(task-notification|tool-use|attachment|system)")
+
 # How many recent sessions the resume menu shows.
 RESUME_MENU_LIMIT = 5
 
@@ -167,23 +172,26 @@ def list_recent_sessions(cwd: str, limit: int = RESUME_MENU_LIMIT) -> list[dict]
 
 
 # ── Resume 回顾：读 transcript 尾部最近 N 轮对话 ──────────────────────────────
-def _turn_text(content) -> str:
+def _turn_text(content, is_user: bool = False) -> str:
     """Flatten a transcript turn's message.content to the human-readable text.
 
     Keeps only `text` blocks — drops tool_use / tool_result / thinking noise so
-    the recap shows what was actually said, not machinery.
+    the recap shows what was actually said, not machinery. For user turns,
+    system re-injections (task-notification / tool-use / attachment / system)
+    are dropped whole — they're type==user but not what the human typed.
     """
     if isinstance(content, str):
-        return _strip_wrappers(content)
-    if isinstance(content, list):
-        parts = []
-        for blk in content:
-            if isinstance(blk, dict) and blk.get("type") == "text" and blk.get("text"):
-                parts.append(str(blk["text"]))
-        text = "\n".join(parts)
+        raw = content
+    elif isinstance(content, list):
+        parts = [str(blk["text"]) for blk in content
+                 if isinstance(blk, dict) and blk.get("type") == "text" and blk.get("text")]
+        raw = "\n".join(parts)
     else:
         return ""
-    return _strip_wrappers(text)
+    # user turn 的系统回灌整段丢弃（在剥标签前判，剥掉标签就认不出了）
+    if is_user and _SYSTEM_TURN_RE.match(raw):
+        return ""
+    return _strip_wrappers(raw)
 
 
 def _strip_wrappers(text: str) -> str:
@@ -228,7 +236,8 @@ def tail_turns(cwd: str, session_id: str,
                 role = d.get("type")
                 if role not in ("user", "assistant"):
                     continue
-                text = _turn_text((d.get("message") or {}).get("content"))
+                text = _turn_text((d.get("message") or {}).get("content"),
+                                  is_user=(role == "user"))
                 if not text:
                     continue
                 if seq and seq[-1][0] == role:
