@@ -117,6 +117,8 @@ def handle_command(text: str) -> str:
         return _cmd_end(args[0])
     if cmd == "stop":
         return _cmd_stop()
+    if cmd == "kill":
+        return _cmd_kill()
     if cmd == "rename":
         if not args:
             return "用法：/rename <new-alias>"
@@ -138,6 +140,7 @@ def _help_text() -> str:
         "/new — 列项目→开全新会话（不接回历史；回 0 开空会话）\n"
         "/end 「alias」— 结束会话（60s 内再发一次确认）\n"
         "/stop — 中断当前会话正在执行的任务（发 ESC）\n"
+        "/kill — 终结当前会话（停 daemon+child，历史保留可 /proj 接回）\n"
         "/rename 「new」— 重命名当前会话\n"
         "/backend — 看/切默认 AI 后端（用于之后新建的会话）\n"
         "/help — 显示本帮助\n"
@@ -519,6 +522,44 @@ def _cmd_stop() -> str:
             "任务停止后发下一条消息继续。"
         )
     return f"会话 {alias!r} 不在线，没有正在执行的任务。"
+
+
+# ── /kill ────────────────────────────────────────────────────────────────
+def _cmd_kill() -> str:
+    """终结当前会话：让 daemon 主动 kill 自己的 child + 退出（不重启）。
+
+    写 control_path = "STOP"，daemon 主循环认它 → 主动收尾（见 docs/后端设计.md
+    "STOP 控制信号"）。发一次即杀，不二次确认。daemon 不活时直接清 current。
+    """
+    alias = get_current()
+    if not alias:
+        return "当前没有活跃会话。"
+    m = load_meta_for(alias) or {}
+    daemon_pid = m.get("daemon_pid")
+    if not (daemon_pid and _pid_alive(daemon_pid)):
+        # daemon 已不活：没人读 STOP，直接清 current，会话壳保留
+        _clear_current()
+        return f"会话 {alias!r} 的 daemon 已不在，已清当前选中。"
+    try:
+        p = control_path(alias)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("STOP", encoding="utf-8")
+    except Exception as e:
+        return f"⚠️ 终结信号写入失败：{e}"
+    _clear_current()
+    return (
+        f"已终结会话 {alias!r}（daemon 收尾退出中）。已清当前选中，"
+        "下条消息会弹 /proj 让你选。会话历史保留，可 /proj 接回。"
+    )
+
+
+def _clear_current() -> None:
+    """清掉 _current.txt（终结会话后不再指向它）。"""
+    from .paths import CURRENT_FILE
+    try:
+        CURRENT_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 # ── /rename ──────────────────────────────────────────────────────────────

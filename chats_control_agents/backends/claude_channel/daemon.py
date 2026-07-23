@@ -454,6 +454,24 @@ def main() -> int:
             if sid:
                 _do_resume(sid)
                 return True
+        if raw == "STOP":
+            # 主动终结：daemon 自己 kill child + 清 meta + 置 stop 让主循环干净退出。
+            # 这是"用户要它停"，不是 child 崩了——不走"进程已退出"报错分支。
+            # 见 docs/后端设计.md "STOP 控制信号"。
+            log.info("STOP requested — killing child + exiting daemon")
+            cur = holder.get("proc")
+            try:
+                if cur is not None and cur.isalive():
+                    cur.terminate(force=True)
+            except Exception as e:
+                log.warning("stop: kill child failed: %s", e)
+            holder["proc"] = None
+            try:
+                lc.write_meta(ctx, daemon_pid=None, child_pid=None)
+            except Exception as e:
+                log.warning("stop: clear meta failed: %s", e)
+            holder["stop"] = True
+            return True
         return False
 
     # 就绪：写 marker（watch_ready 只用它兜底失败）。
@@ -483,6 +501,11 @@ def main() -> int:
         # resume 控制信号优先于 inbox：若本轮做了 resume，child 已换新，
         # inbox baseline 不动（resume 不消费用户消息，只换会话）。
         if _check_resume_signal():
+            # STOP 主动终结 → 已 kill child + 清 meta，干净退出（不发"进程已退出"
+            # 报错——是用户要它停）。必须在下面死亡检查之前拦截。
+            if holder.get("stop"):
+                log.info("STOP handled — daemon exiting cleanly")
+                return 0
             # resume 致命失败 → 已 kill 僵尸 + 清 child_pid + 写提示，干净退出。
             # 必须在下面"进程已退出"检查之前拦截，否则会覆盖 resume 失败提示。
             if holder.get("exit"):
