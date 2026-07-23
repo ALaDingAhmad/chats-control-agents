@@ -259,5 +259,14 @@ def tail_turns(cwd: str, session_id: str,
 
 
 def _trunc(s: str, n: int) -> str:
-    s = " ".join((s or "").split())
+    # 保留内容里的换行（每段多行内容不压成一长行），只清理每行的多余空白，
+    # 折叠连续空行。见 docs/入站路由.md "接回后回顾" 换行策略。
+    lines = [" ".join(ln.split()) for ln in (s or "").splitlines()]
+    # 折叠连续空行为单个
+    out_lines: list[str] = []
+    for ln in lines:
+        if ln == "" and (not out_lines or out_lines[-1] == ""):
+            continue
+        out_lines.append(ln)
+    s = "\n".join(out_lines).strip()
     return s if len(s) <= n else s[:n] + "…"

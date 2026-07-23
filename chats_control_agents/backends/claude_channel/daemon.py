@@ -148,7 +148,9 @@ def _resume_recap(cwd: str, session_id: str) -> str:
             blocks.append(f"你：{p['user']}")
         if p.get("assistant"):
             blocks.append(f"我：{p['assistant']}")
-    return "\n".join(blocks)
+    # 段间 4 个 \n（两个空行）：iLink 手机端吞单换行、留空行，塞两行才真正分段。
+    # 见 docs/入站路由.md "接回后回顾" 换行策略。
+    return "\n\n\n\n".join(blocks)
 
 
 def _free_port() -> int:
@@ -454,13 +456,25 @@ def main() -> int:
                 return True
         return False
 
-    # 就绪：写 marker，让 web/spawn.watch_ready 给用户发就绪通知。
+    # 就绪：写 marker（watch_ready 只用它兜底失败）。
     try:
         _marker_path(ALIAS).write_text(str(os.getpid()), encoding="utf-8")
     except Exception as e:
         log.warning("write ready marker failed: %s", e)
+    # 成功提示统一由 daemon 发（见 docs/入站路由.md "就绪通知"）。但若已有 pending
+    # RESUME（resume 路径：router 起 daemon 后立刻写了 RESUME），首次就绪不发——
+    # 马上要 resume，由 _do_resume 发"已接回+回顾"，否则重复。
+    _pending_resume = False
+    try:
+        cp = control_path(ALIAS)
+        if cp.exists() and cp.read_text(encoding="utf-8").strip().startswith("RESUME:"):
+            _pending_resume = True
+    except Exception:
+        pass
+    if not _pending_resume:
+        _write_outbox(ALIAS, "✅ 会话已就绪，可以开始聊了")
     print(f"[daemon] ready, polling inbox for alias={ALIAS}")
-    log.info("entering inbox poll loop")
+    log.info("entering inbox poll loop (pending_resume=%s)", _pending_resume)
 
     # 阶段 3：inbox 轮询主循环。startup 以当前 mtime 为 baseline，不重放旧消息。
     p = inbox_path(ALIAS)

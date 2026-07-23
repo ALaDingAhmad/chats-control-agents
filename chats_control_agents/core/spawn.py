@@ -42,13 +42,18 @@ def _write_outbox_notice(alias: str, body: str) -> None:
 
 
 async def watch_ready(alias: str, daemon_pid: int) -> None:
-    """Watch daemon liveness and readiness after spawn."""
+    """Watch daemon liveness after spawn — FAILURE fallback only.
+
+    成功提示（"✅ 已就绪"/"✅ 已接回"）统一由 daemon 自己发（见 docs/入站路由.md
+    "就绪通知"）：daemon 首次就绪发"会话已就绪"、resume 就绪发"已接回+回顾"。
+    watch_ready 只在 daemon 起不来时兜底告警——marker 出现就静默 return，不发成功
+    提示（否则 resume 场景 watch_ready + _do_resume 各发一条，重复）。
+    """
     deadline = asyncio.get_event_loop().time() + READY_NOTIFY_TIMEOUT_SECS
     marker = loop_marker_path(alias)
     while asyncio.get_event_loop().time() < deadline:
         if marker.exists():
-            _write_outbox_notice(alias, f"✅ 会话 {alias!r} 已就绪，可以继续发消息了。")
-            return
+            return  # 就绪成功 → 静默；成功提示由 daemon 发
         if not _pid_alive(daemon_pid):
             _write_outbox_notice(
                 alias,
