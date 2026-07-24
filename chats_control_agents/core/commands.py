@@ -376,6 +376,10 @@ def _cmd_pick_resume(n: int) -> str:
     )
 
 
+# backend 按会话绑定，已有会话改不了——想换只能切默认后新开。
+_BACKEND_HINT = "换后端：/backend <名> 再 /new 新开会话。"
+
+
 def _start_session_for_cwd(cwd: str, *, project: dict | None = None,
                            blank: bool = False, silent: bool = False) -> str:
     """Create/switch a session for a cwd and autospawn its daemon.
@@ -389,7 +393,8 @@ def _start_session_for_cwd(cwd: str, *, project: dict | None = None,
 
     if blank:
         alias = make_alias_for_cwd(cwd)
-        create_session_dir(alias, cwd, backend=get_default_backend())
+        backend = get_default_backend()
+        create_session_dir(alias, cwd, backend=backend)
         try:
             set_current(alias)
         except Exception:
@@ -398,13 +403,15 @@ def _start_session_for_cwd(cwd: str, *, project: dict | None = None,
         if silent:
             return ""
         return (
-            f"已开空会话 {alias}（cwd={cwd}），"
-            f"正在自动启动 daemon（约 10 秒就绪）。"
+            f"已开空会话 {alias}（cwd={cwd}，backend={backend}），"
+            f"正在自动启动 daemon（约 10 秒就绪）。\n"
+            f"{_BACKEND_HINT}"
         )
 
     # Already wired-up project (has an alias)
     if project and project.get("alias"):
         alias = project["alias"]
+        backend = (load_meta_for(alias) or {}).get("backend", "?")
         if project.get("online"):
             try:
                 set_current(alias)
@@ -412,7 +419,10 @@ def _start_session_for_cwd(cwd: str, *, project: dict | None = None,
                 return f"切换失败：{e}"
             if silent:
                 return ""
-            return f"已切到 {alias}（{project['abs_path']}）。"
+            return (
+                f"已切到 {alias}（{project['abs_path']}，backend={backend}）。\n"
+                f"{_BACKEND_HINT}"
+            )
         try:
             set_current(alias)
         except Exception:
@@ -421,8 +431,9 @@ def _start_session_for_cwd(cwd: str, *, project: dict | None = None,
         if silent:
             return ""
         return (
-            f"已切到 {alias}（{project['abs_path']}），"
-            f"daemon 离线，正在自动启动（约 10 秒就绪）。"
+            f"已切到 {alias}（{project['abs_path']}，backend={backend}），"
+            f"daemon 离线，正在自动启动（约 10 秒就绪）。\n"
+            f"{_BACKEND_HINT}"
         )
 
     # New project (or blank=False but no wired alias): derive alias from basename
@@ -443,7 +454,8 @@ def _start_session_for_cwd(cwd: str, *, project: dict | None = None,
         n_suffix += 1
         alias = f"{base}_{n_suffix}"
 
-    create_session_dir(alias, cwd, backend=get_default_backend())
+    backend = get_default_backend()
+    create_session_dir(alias, cwd, backend=backend)
     try:
         set_current(alias)
     except Exception:
@@ -452,8 +464,9 @@ def _start_session_for_cwd(cwd: str, *, project: dict | None = None,
     if silent:
         return ""
     return (
-        f"已切到 {alias}（{cwd}），"
-        f"正在自动启动 daemon（约 10 秒就绪）。"
+        f"已切到 {alias}（{cwd}，backend={backend}），"
+        f"正在自动启动 daemon（约 10 秒就绪）。\n"
+        f"{_BACKEND_HINT}"
     )
 
 
